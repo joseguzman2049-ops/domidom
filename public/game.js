@@ -107,13 +107,13 @@ let equippedSkin = SKINS[0];
 
 // ── Provinces — Ciudades RD ────────────────────────────────────
 const PROVINCES_LOCAL = [
-  { id:'santo_domingo', name:'Santo Domingo',  buyIn:5000,   featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'santiago',      name:'Santiago',       buyIn:10000,  featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'la_romana',     name:'La Romana',      buyIn:25000,  featured:false, playersInQueue:0, activeTables:0 },
-  { id:'san_pedro',     name:'San Pedro de Macorís', buyIn:50000, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'puerto_plata',  name:'Puerto Plata',   buyIn:100000, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'punta_cana',    name:'Punta Cana',     buyIn:250000, featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'cap_cana',      name:'Cap Cana VIP',   buyIn:500000, featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'santo_domingo', name:'Santo Domingo',  buyIn:400,   featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'santiago',      name:'Santiago',       buyIn:1000,  featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'la_romana',     name:'La Romana',      buyIn:2500,  featured:false, playersInQueue:0, activeTables:0 },
+  { id:'san_pedro',     name:'San Pedro de Macorís', buyIn:5000, featured:false, playersInQueue:0, activeTables:0 },
+  { id:'puerto_plata',  name:'Puerto Plata',   buyIn:8000,  featured:false, playersInQueue:0, activeTables:0 },
+  { id:'punta_cana',    name:'Punta Cana',     buyIn:12000, featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'cap_cana',      name:'Cap Cana VIP',   buyIn:20000, featured:true,  playersInQueue:0, activeTables:0 },
 ];
 
 // ── Pip rendering ──────────────────────────────────────────────

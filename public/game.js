@@ -28,6 +28,51 @@ let crashRocketY = 0;
 let crashStars = [];
 let crashPlanets = [];
 
+// Live round system
+let crashRoundCountdown = 0;
+let crashCountdownInterval = null;
+let crashFakeActivityInterval = null;
+
+// Dominican fake users
+const FAKE_USERS_DR = [
+  'ElCibaeño23','MarisolRD','PedritoSD','YaniraJimenez','JuanRD21',
+  'CarlosMerengue','RosaLina_PP','ManuelEspiritusanto','LuisaPeralta','KarelisND',
+  'FrankyLaRomana','DarioPuntaCana','YolandaSSPM','EduardoMoca','NatividadRD',
+  'ChiquitoSD','MargaritaPP','RamosCapCana','BelkisSD','AugustoSantiago',
+  'JocasySanchez','ElProfeRD','CristinaMacoris','TitoLaVega','GloriaSalcedo',
+  'ManuelaSosua','ElFreskitoRD','DayanaHiguey','PabloMontecristi','IsabelBaoruco',
+  'RafaelSanJuan','YennyAzua','FelipeElias','NormaConstanza','OswaldoSamana',
+  'TeofiloJaraba','AnaisdeMoya','LeopoldoRD','CelesteNeyba','HeribertoRD',
+  'MaricarmenSD','ElPlayboyRD','YokastaND','GabrielPP','IsauraMiches',
+  'CriostomoCana','NancyLuperón','FidelioRD','AmpароRD','RufinoCibao'
+];
+
+function fakeBet() { return (Math.floor(Math.random() * 95) + 1) * 50; }
+function fakeUser() { return FAKE_USERS_DR[Math.floor(Math.random() * FAKE_USERS_DR.length)]; }
+function fakeMult() { return (1.1 + Math.random() * 4).toFixed(2); }
+
+// Fake online count based on time of day
+function getFakeOnlineCount() {
+  const h = new Date().getHours(); // local hour
+  // Peak hours: 7pm-12am DR time (19-24)
+  let base;
+  if (h >= 20 && h <= 23) base = 280 + Math.floor(Math.random() * 80);
+  else if (h >= 18 && h < 20) base = 180 + Math.floor(Math.random() * 60);
+  else if (h >= 12 && h < 18) base = 120 + Math.floor(Math.random() * 50);
+  else if (h >= 7 && h < 12)  base = 70  + Math.floor(Math.random() * 40);
+  else                         base = 30  + Math.floor(Math.random() * 25);
+  return base;
+}
+
+function startFakeOnlineCount() {
+  function update() {
+    const count = getFakeOnlineCount();
+    document.querySelectorAll('#online-count').forEach(el => el.textContent = count);
+  }
+  update();
+  setInterval(update, 15000 + Math.random() * 10000);
+}
+
 // Mines state
 let minesActive = false;
 let minesBoard = [];
@@ -62,13 +107,13 @@ let equippedSkin = SKINS[0];
 
 // ── Provinces — Ciudades RD ────────────────────────────────────
 const PROVINCES_LOCAL = [
-  { id:'santo_domingo', name:'Santo Domingo',  buyIn:400,  featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'santiago',      name:'Santiago',       buyIn:800,  featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'la_romana',     name:'La Romana',      buyIn:1500, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'san_pedro',     name:'San Pedro de Macorís', buyIn:2500, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'puerto_plata',  name:'Puerto Plata',   buyIn:4000, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'punta_cana',    name:'Punta Cana',     buyIn:6000, featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'cap_cana',      name:'Cap Cana VIP',   buyIn:8000, featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'santo_domingo', name:'Santo Domingo',  buyIn:5000,   featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'santiago',      name:'Santiago',       buyIn:10000,  featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'la_romana',     name:'La Romana',      buyIn:25000,  featured:false, playersInQueue:0, activeTables:0 },
+  { id:'san_pedro',     name:'San Pedro de Macorís', buyIn:50000, featured:false, playersInQueue:0, activeTables:0 },
+  { id:'puerto_plata',  name:'Puerto Plata',   buyIn:100000, featured:false, playersInQueue:0, activeTables:0 },
+  { id:'punta_cana',    name:'Punta Cana',     buyIn:250000, featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'cap_cana',      name:'Cap Cana VIP',   buyIn:500000, featured:true,  playersInQueue:0, activeTables:0 },
 ];
 
 // ── Pip rendering ──────────────────────────────────────────────
@@ -149,12 +194,15 @@ function playSound(type) {
 
 // ── Init ───────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
-  await loadInitial();
-  document.getElementById('loading-screen').style.display = 'none';
-  initCrashCanvas();
-  buildMinesGrid();
-  addSoundButton();
-  buildBlackjackUI();
+ await loadInitial();
+ document.getElementById('loading-screen').style.display = 'none';
+ initCrashCanvas();
+ buildMinesGrid();
+ addSoundButton();
+ buildBlackjackUI();
+ startFakeOnlineCount();
+ // Auto-start crash live rounds
+ setTimeout(() => startCrashCountdown(7), 2000);
 });
 
 function addSoundButton() {
@@ -598,51 +646,147 @@ function renderGameState(state) {
 }
 
 // ── Board ──────────────────────────────────────────────────────
-function renderBoard(board, leftEnd, rightEnd) {
-  const snake = document.getElementById('snake');
-  if (!board.length) {
-    snake.innerHTML = '<div style="color:rgba(255,255,255,0.2);font-size:0.82rem;padding:20px;text-align:center;">Esperando primera ficha…</div>';
-    snake.style.height = '180px'; return;
-  }
-  const container = document.getElementById('board-container');
-  const maxW = Math.max(200, container.clientWidth - 16);
-  const maxH = Math.max(160, container.clientHeight - 16);
-  const TW = 44, TH = 22, GAP = 3;
-  const positions = [];
-  let cx = 0, cy = 0, dir = 1;
-  for (let i = 0; i < board.length; i++) {
-    const tile = board[i];
-    const isDouble = tile[0] === tile[1];
-    const tw = isDouble ? TH : TW;
-    const th = isDouble ? TW : TH;
-    const wouldEnd = dir === 1 ? cx + tw : cx - tw;
-    const overflow = dir === 1 ? wouldEnd > maxW * 0.5 : wouldEnd < -maxW * 0.5;
-    if (overflow && i > 0) { cy += TH + GAP + 4; dir *= -1; cx = dir === 1 ? -maxW * 0.5 + 8 : maxW * 0.5 - 8; }
-    positions.push({ x: dir === 1 ? cx : cx - tw, y: cy, isDouble, tw, th });
-    cx = dir === 1 ? cx + tw + GAP : cx - tw - GAP;
-  }
-  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-  positions.forEach(p => { minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x+p.tw); maxY=Math.max(maxY,p.y+p.th); });
-  const totalW=maxX-minX, totalH=maxY-minY;
-  const scale = Math.min(totalW>maxW?maxW/(totalW+16):1, totalH>maxH?maxH/(totalH+16):1, 1);
-  const offsetX=(maxW-totalW*scale)/2-minX*scale;
-  const offsetY=(maxH-totalH*scale)/2-minY*scale;
-  const skin=equippedSkin;
-  let html='';
-  positions.forEach((p,i) => {
-    const [a,b]=board[i], w=Math.round(p.tw*scale), h=Math.round(p.th*scale);
-    const x=Math.round(p.x*scale+offsetX), y=Math.round(p.y*scale+offsetY);
-    const glow=skin.glow?`0 0 6px ${skin.glow}`:'0 1px 3px rgba(0,0,0,0.3)';
-    const br=Math.max(2,Math.round(3*scale)), bw=Math.max(1,Math.round(scale));
-    const halfA=p.isDouble?`width:100%;height:${Math.floor(h/2)}px`:`height:100%;width:${Math.floor(w/2)}px`;
-    const divider=p.isDouble?`height:${bw}px;width:100%`:`width:${bw}px;height:100%`;
-    html+=`<div style="position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;background:${skin.bg};border:${bw}px solid ${skin.edge};border-radius:${br}px;box-shadow:${glow};display:flex;flex-direction:${p.isDouble?'column':'row'};overflow:hidden;">
-      <div style="${halfA};display:flex;align-items:center;justify-content:center;">${makePipGrid(a,skin.pip,p.isDouble?w:h)}</div>
-      <div style="${divider};background:${skin.edge};flex-shrink:0;"></div>
-      <div style="${halfA};display:flex;align-items:center;justify-content:center;">${makePipGrid(b,skin.pip,p.isDouble?w:h)}</div>
-    </div>`;
+// Pip layout: posiciones activas en grilla 3x3 (0..8, izq-der, arriba-abajo)
+function pipLayout(n) {
+  const map = {
+    0: [],
+    1: [4],
+    2: [0, 8],
+    3: [0, 4, 8],
+    4: [0, 2, 6, 8],
+    5: [0, 2, 4, 6, 8],
+    6: [0, 2, 3, 5, 6, 8]
+  };
+  return Array.from({length: 9}, (_, i) => (map[n] || []).includes(i));
+}
+
+// Crear elemento DOM de una ficha con puntos reales
+function tileElDOM(vals, horizontal) {
+  const d = document.createElement('div');
+  d.style.cssText = `
+    background:#f7f1de;border:1px solid #9a8a6a;border-radius:6px;
+    box-shadow:0 3px 8px rgba(0,0,0,.35);
+    display:flex;flex-direction:${horizontal ? 'row' : 'column'};
+    position:absolute;user-select:none;overflow:hidden;
+  `;
+  vals.forEach((n, idx) => {
+    const half = document.createElement('div');
+    half.style.cssText = `
+      flex:1;display:grid;grid-template-columns:repeat(3,1fr);
+      grid-template-rows:repeat(3,1fr);place-items:center;padding:3px;gap:1px;
+      ${idx === 0 ? (horizontal ? 'border-right:1px solid #9a8a6a' : 'border-bottom:1px solid #9a8a6a') : ''}
+    `;
+    pipLayout(n).forEach(isOn => {
+      const cell = document.createElement('span');
+      if (isOn) {
+        cell.style.cssText = 'width:6px;height:6px;border-radius:50%;background:#1a1a1a;box-shadow:inset 0 1px 1px rgba(255,255,255,.3),0 1px 1px rgba(0,0,0,.5);display:block;';
+      } else {
+        cell.style.cssText = 'width:6px;height:6px;display:block;';
+      }
+      half.appendChild(cell);
+    });
+    d.appendChild(half);
   });
-  snake.style.position='relative'; snake.style.height=`${Math.round(maxH)}px`; snake.innerHTML=html;
+  return d;
+}
+
+function renderBoard(board, leftEnd, rightEnd) {
+  const container = document.getElementById('board-container');
+  const felt = container.querySelector('.board-felt') || container;
+
+  // Limpiar fichas anteriores (conservar el div #snake si existe)
+  let snake = document.getElementById('snake');
+  if (!snake) { snake = document.createElement('div'); snake.id = 'snake'; felt.appendChild(snake); }
+  snake.innerHTML = '';
+  snake.style.cssText = 'position:relative;';
+
+  if (!board.length) {
+    snake.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:0.82rem;padding:20px;text-align:center;">Esperando primera ficha…</div>';
+    snake.style.height = '180px';
+    return;
+  }
+
+  const L = 64;     // largo de una ficha
+  const S = 34;     // grosor de una ficha
+  const VRUN = 2;   // fichas verticales por vuelta
+
+  const avail = (container.clientWidth || 400) - 70;
+  const minX = L;
+  const maxX = Math.max(L * 4, avail);
+
+  let P = { x: L, y: L };
+  let dir = 'R';
+  let lastH = 'R';
+  let vCount = 0;
+
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  const els = [];
+
+  for (let i = 0; i < board.length; i++) {
+    const t = board[i];
+    const isDouble = t[0] === t[1];
+    let advance, thickness, vertical, vals;
+
+    if (dir === 'D') {
+      if (isDouble) { vertical = false; advance = S; thickness = L; }
+      else          { vertical = true;  advance = L; thickness = S; }
+      vals = [t[0], t[1]];
+    } else {
+      if (isDouble) { vertical = true;  advance = S; thickness = L; }
+      else          { vertical = false; advance = L; thickness = S; }
+      vals = (dir === 'L') ? [t[1], t[0]] : [t[0], t[1]];
+    }
+
+    const W = vertical ? S : L;
+    const H = vertical ? L : S;
+
+    let Lx, Ty;
+    if (dir === 'R')      { Lx = P.x;       Ty = P.y - thickness / 2; }
+    else if (dir === 'L') { Lx = P.x - W;   Ty = P.y - thickness / 2; }
+    else                  { Lx = P.x - W/2; Ty = P.y; }
+
+    const e = tileElDOM(vals, !vertical);
+    e.style.left   = Lx + 'px';
+    e.style.top    = Ty + 'px';
+    e.style.width  = W + 'px';
+    e.style.height = H + 'px';
+    els.push(e);
+    snake.appendChild(e);
+
+    x0 = Math.min(x0, Lx); y0 = Math.min(y0, Ty);
+    x1 = Math.max(x1, Lx + W); y1 = Math.max(y1, Ty + H);
+
+    if (dir === 'R')      P = { x: P.x + advance, y: P.y };
+    else if (dir === 'L') P = { x: P.x - advance, y: P.y };
+    else                  P = { x: P.x, y: P.y + advance };
+
+    if (dir === 'R' && P.x >= maxX)     { dir = 'D'; vCount = 0; lastH = 'R'; }
+    else if (dir === 'L' && P.x <= minX){ dir = 'D'; vCount = 0; lastH = 'L'; }
+    else if (dir === 'D') {
+      vCount++;
+      if (vCount >= VRUN) dir = (lastH === 'R') ? 'L' : 'R';
+    }
+  }
+
+  // Normalizar al origen (0,0)
+  els.forEach(el => {
+    el.style.left = (parseFloat(el.style.left) - x0) + 'px';
+    el.style.top  = (parseFloat(el.style.top)  - y0) + 'px';
+  });
+
+  const totalW = x1 - x0;
+  const totalH = y1 - y0;
+  snake.style.width  = totalW + 'px';
+  snake.style.height = totalH + 'px';
+
+  // Auto-escalar para que quepa en el contenedor
+  requestAnimationFrame(() => {
+    const avW = (container.clientWidth  || 400) - 44;
+    const avH = Math.max(160, (container.clientHeight || 300) - 44);
+    const scale = Math.min(1, avW / totalW, avH / totalH);
+    snake.style.transform = 'scale(' + Math.max(0.14, scale) + ')';
+    snake.style.transformOrigin = 'top left';
+  });
 }
 
 // ── Hand ───────────────────────────────────────────────────────
@@ -745,6 +889,148 @@ let crashStarObjects = [];
 let crashRocketPx = 0;
 let crashRocketPy = 0;
 let crashSpaceTime = 0;
+
+// ── Crash Live Feed ────────────────────────────────────────────
+function addCrashFeedEntry(msg, type='info') {
+  const feed = document.getElementById('crash-live-feed');
+  if (!feed) return;
+  const colors = { win:'var(--green)', loss:'var(--text3)', cashout:'var(--gold)', info:'var(--blue)' };
+  const entry = document.createElement('div');
+  entry.style.cssText = `font-size:0.74rem;color:${colors[type]||colors.info};animation:toastIn 0.2s ease;`;
+  entry.textContent = msg;
+  feed.appendChild(entry);
+  // Keep max 30 entries
+  while (feed.children.length > 31) feed.removeChild(feed.children[1]);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function startFakeActivity() {
+  stopFakeActivity();
+  crashFakeActivityInterval = setInterval(() => {
+    if (crashState !== 'flying') return;
+    const r = Math.random();
+    const user = fakeUser();
+    const bet = fakeBet();
+    if (r < 0.45) {
+      // Cashout win
+      const mult = (1.1 + Math.random() * (crashMult - 1.0)).toFixed(2);
+      const won = Math.round(bet * mult);
+      addCrashFeedEntry(`✅ ${user} retiró ${won.toLocaleString()} 🪙 (${mult}x)`, 'cashout');
+    } else if (r < 0.75) {
+      // Loss (crash before cashout — shown after crash)
+    } else {
+      // Just bet notification
+      addCrashFeedEntry(`🎯 ${user} apostó ${bet.toLocaleString()} 🪙`, 'info');
+    }
+  }, 900 + Math.random() * 600);
+}
+
+function stopFakeActivity() {
+  if (crashFakeActivityInterval) { clearInterval(crashFakeActivityInterval); crashFakeActivityInterval = null; }
+}
+
+function showCrashLosses(crashedAt) {
+  // Show 2-4 fake losses after crash
+  const count = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      const bet = fakeBet();
+      addCrashFeedEntry(`💥 ${fakeUser()} perdió ${bet.toLocaleString()} 🪙 (explotó en ${crashedAt}x)`, 'loss');
+    }, i * 400);
+  }
+}
+
+// ── Crash Round System (Live rounds) ──────────────────────────
+function startCrashCountdown(seconds) {
+  const banner = document.getElementById('crash-round-banner');
+  const val = document.getElementById('crash-countdown-val');
+  if (banner) banner.style.display = 'block';
+  crashRoundCountdown = seconds;
+  if (val) val.textContent = seconds;
+  if (crashCountdownInterval) clearInterval(crashCountdownInterval);
+  crashCountdownInterval = setInterval(() => {
+    crashRoundCountdown--;
+    if (val) val.textContent = Math.max(0, crashRoundCountdown);
+    if (crashRoundCountdown <= 0) {
+      clearInterval(crashCountdownInterval);
+      if (banner) banner.style.display = 'none';
+      startCrashRound();
+    }
+  }, 1000);
+}
+
+function startCrashRound() {
+  // Reset UI
+  crashState = 'flying';
+  crashMult = 1.0;
+  crashCashedOut = false;
+  crashPoints = [];
+  crashRocketY = 0;
+
+  const multEl = document.getElementById('crash-multiplier');
+  if (multEl) { multEl.textContent = '1.00x'; multEl.classList.remove('crashed'); }
+
+  // Show fake bets entering
+  const betCount = 3 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < betCount; i++) {
+    setTimeout(() => {
+      const bet = fakeBet();
+      addCrashFeedEntry(`🎯 ${fakeUser()} apostó ${bet.toLocaleString()} 🪙`, 'info');
+    }, i * 180);
+  }
+
+  startFakeActivity();
+
+  // Generate crash point
+  const r = Math.random();
+  let crashPoint;
+  if (r < 0.20) { crashPoint = 1.0; }
+  else if (r < 0.50) { crashPoint = 1.0 + Math.random() * 1.5; }
+  else if (r < 0.75) { crashPoint = 2.5 + Math.random() * 2.0; }
+  else if (r < 0.90) { crashPoint = 4.5 + Math.random() * 5.5; }
+  else { crashPoint = 10 + Math.random() * 40; }
+
+  initCrashStars();
+  crashAnimFrame && cancelAnimationFrame(crashAnimFrame);
+  animateCrashLoop(crashPoint);
+}
+
+function animateCrashLoop(crashPoint) {
+  const speed = 0.004 + crashMult * 0.0008;
+  crashMult = Math.min(crashMult + speed, 9999);
+
+  // Update user's bet display
+  if (crashBetAmount > 0 && !crashCashedOut) {
+    const potEl = document.getElementById('crash-potential');
+    if (potEl) potEl.textContent = Math.round(crashBetAmount * crashMult).toLocaleString() + ' 🪙';
+    const liveEl = document.getElementById('crash-live-mult');
+    if (liveEl) liveEl.textContent = crashMult.toFixed(2) + 'x';
+    // Auto cashout
+    if (crashAutoCashout > 0 && crashMult >= crashAutoCashout) { crashCashout(); return; }
+  }
+
+  const multEl = document.getElementById('crash-multiplier');
+  if (multEl) multEl.textContent = crashMult.toFixed(2) + 'x';
+
+  drawCrashFrame();
+
+  if (crashMult >= crashPoint) {
+    doCrash();
+    return;
+  }
+  crashAnimFrame = requestAnimationFrame(() => animateCrashLoop(crashPoint));
+}
+
+function initCrashStars() {
+  crashStars = [];
+  crashPlanets = [];
+  for (let i = 0; i < 80; i++) {
+    crashStars.push({ x: Math.random(), y: Math.random(), size: Math.random() * 2 + 0.5, speed: Math.random() * 0.3 + 0.1 });
+  }
+  for (let i = 0; i < 3; i++) {
+    crashPlanets.push({ x: Math.random(), y: Math.random() * 0.7, size: 8 + Math.random() * 18, speed: 0.05 + Math.random() * 0.08, color: ['#c87941','#7a9fc4','#c4a87a'][i] });
+  }
+}
 
 function initCrashCanvas() {
   crashCanvas = document.getElementById('crash-canvas');

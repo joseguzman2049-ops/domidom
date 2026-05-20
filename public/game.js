@@ -911,18 +911,18 @@ function startFakeActivity() {
     const r = Math.random();
     const user = fakeUser();
     const bet = fakeBet();
-    if (r < 0.45) {
-      // Cashout win
-      const mult = (1.1 + Math.random() * (crashMult - 1.0)).toFixed(2);
-      const won = Math.round(bet * mult);
-      addCrashFeedEntry(`✅ ${user} retiró ${won.toLocaleString()} 🪙 (${mult}x)`, 'cashout');
-    } else if (r < 0.75) {
-      // Loss (crash before cashout — shown after crash)
-    } else {
-      // Just bet notification
+    if (r < 0.70) {
+      // 70% ganan — retiran en multiplicador bajo-medio antes del crash
+      const maxMult = Math.min(crashMult, 8.0);
+      const mult = (1.2 + Math.random() * Math.max(0.3, maxMult - 1.2)).toFixed(2);
+      const won = Math.round(bet * parseFloat(mult));
+      addCrashFeedEntry(`✅ ${user} retiró ${won.toLocaleString()} 🪙 a ${mult}x`, 'cashout');
+    } else if (r < 0.80) {
+      // 10% apuestan (se ve activo)
       addCrashFeedEntry(`🎯 ${user} apostó ${bet.toLocaleString()} 🪙`, 'info');
     }
-  }, 900 + Math.random() * 600);
+    // 20% no muestran nada (silencio natural)
+  }, 700 + Math.random() * 500);
 }
 
 function stopFakeActivity() {
@@ -930,13 +930,22 @@ function stopFakeActivity() {
 }
 
 function showCrashLosses(crashedAt) {
-  // Show 2-4 fake losses after crash
-  const count = 2 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < count; i++) {
+  // Solo 1-2 pérdidas (minoría) y 2-3 ganancias tardías de gente que sí retiró
+  const lossCount = 1 + Math.floor(Math.random() * 2);
+  const winCount = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < winCount; i++) {
     setTimeout(() => {
       const bet = fakeBet();
-      addCrashFeedEntry(`💥 ${fakeUser()} perdió ${bet.toLocaleString()} 🪙 (explotó en ${crashedAt}x)`, 'loss');
-    }, i * 400);
+      const mult = (1.1 + Math.random() * 2.5).toFixed(2);
+      const won = Math.round(bet * parseFloat(mult));
+      addCrashFeedEntry(`✅ ${fakeUser()} retiró ${won.toLocaleString()} 🪙 a ${mult}x`, 'cashout');
+    }, i * 300);
+  }
+  for (let i = 0; i < lossCount; i++) {
+    setTimeout(() => {
+      const bet = fakeBet();
+      addCrashFeedEntry(`💥 ${fakeUser()} perdió ${bet.toLocaleString()} 🪙`, 'loss');
+    }, winCount * 300 + i * 400);
   }
 }
 
@@ -948,6 +957,16 @@ function startCrashCountdown(seconds) {
   crashRoundCountdown = seconds;
   if (val) val.textContent = seconds;
   if (crashCountdownInterval) clearInterval(crashCountdownInterval);
+
+  // Mostrar apuestas ficticias durante la cuenta regresiva
+  const preBets = 3 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < preBets; i++) {
+    setTimeout(() => {
+      const bet = fakeBet();
+      addCrashFeedEntry(`🎯 ${fakeUser()} apostó ${bet.toLocaleString()} 🪙`, 'info');
+    }, i * (seconds * 1000 / (preBets + 1)));
+  }
+
   crashCountdownInterval = setInterval(() => {
     crashRoundCountdown--;
     if (val) val.textContent = Math.max(0, crashRoundCountdown);
@@ -970,25 +989,26 @@ function startCrashRound() {
   const multEl = document.getElementById('crash-multiplier');
   if (multEl) { multEl.textContent = '1.00x'; multEl.classList.remove('crashed'); }
 
-  // Show fake bets entering
-  const betCount = 3 + Math.floor(Math.random() * 4);
+  // Show fake bets entering — más actividad al inicio
+  const betCount = 6 + Math.floor(Math.random() * 6);
   for (let i = 0; i < betCount; i++) {
     setTimeout(() => {
       const bet = fakeBet();
       addCrashFeedEntry(`🎯 ${fakeUser()} apostó ${bet.toLocaleString()} 🪙`, 'info');
-    }, i * 180);
+    }, i * 120);
   }
 
   startFakeActivity();
 
-  // Generate crash point
+  // Generate crash point — más favorable para ganancias ficticias
   const r = Math.random();
   let crashPoint;
-  if (r < 0.20) { crashPoint = 1.0; }
-  else if (r < 0.50) { crashPoint = 1.0 + Math.random() * 1.5; }
-  else if (r < 0.75) { crashPoint = 2.5 + Math.random() * 2.0; }
-  else if (r < 0.90) { crashPoint = 4.5 + Math.random() * 5.5; }
-  else { crashPoint = 10 + Math.random() * 40; }
+  if (r < 0.10) { crashPoint = 1.0; }
+  else if (r < 0.30) { crashPoint = 1.3 + Math.random() * 1.0; }
+  else if (r < 0.55) { crashPoint = 2.3 + Math.random() * 2.0; }
+  else if (r < 0.78) { crashPoint = 4.0 + Math.random() * 5.0; }
+  else if (r < 0.92) { crashPoint = 9.0 + Math.random() * 10.0; }
+  else { crashPoint = 19 + Math.random() * 30; }
 
   initCrashStars();
   crashAnimFrame && cancelAnimationFrame(crashAnimFrame);

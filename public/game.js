@@ -64,10 +64,10 @@ let equippedSkin = SKINS[0];
 const PROVINCES_LOCAL = [
   { id:'santo_domingo', name:'Santo Domingo',  buyIn:400,  featured:true,  playersInQueue:0, activeTables:0 },
   { id:'santiago',      name:'Santiago',       buyIn:800,  featured:true,  playersInQueue:0, activeTables:0 },
-  { id:'la_romana',     name:'La Romana',      buyIn:1200, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'san_pedro',     name:'San Pedro de Macorís', buyIn:2000, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'puerto_plata',  name:'Puerto Plata',   buyIn:3000, featured:false, playersInQueue:0, activeTables:0 },
-  { id:'punta_cana',    name:'Punta Cana',     buyIn:5000, featured:true,  playersInQueue:0, activeTables:0 },
+  { id:'la_romana',     name:'La Romana',      buyIn:1500, featured:false, playersInQueue:0, activeTables:0 },
+  { id:'san_pedro',     name:'San Pedro de Macorís', buyIn:2500, featured:false, playersInQueue:0, activeTables:0 },
+  { id:'puerto_plata',  name:'Puerto Plata',   buyIn:4000, featured:false, playersInQueue:0, activeTables:0 },
+  { id:'punta_cana',    name:'Punta Cana',     buyIn:6000, featured:true,  playersInQueue:0, activeTables:0 },
   { id:'cap_cana',      name:'Cap Cana VIP',   buyIn:8000, featured:true,  playersInQueue:0, activeTables:0 },
 ];
 
@@ -979,6 +979,8 @@ function startCrashRound() {
 
 function crashCashout() {
   if (crashCashedOut||crashState!=='flying') return;
+  // House rule: if above 3.5x, cashout attempt triggers crash
+  if (crashMult > 3.5) { doCrash(); return; }
   crashCashedOut=true; clearInterval(crashInterval);
   const winAmount=Math.floor(crashBetAmount*crashMult);
   currentUser.coins+=winAmount; updateWalletDisplay();

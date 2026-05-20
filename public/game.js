@@ -750,16 +750,27 @@ function initCrashCanvas() {
   crashCanvas = document.getElementById('crash-canvas');
   if (!crashCanvas) return;
   crashCtx = crashCanvas.getContext('2d');
-  resizeCrashCanvas();
-  window.addEventListener('resize', resizeCrashCanvas);
-  initCrashStars();
+  // Force correct size immediately
+  setTimeout(() => {
+    resizeCrashCanvas();
+    initCrashStars();
+    // Start idle animation loop right away
+    if (crashAnimFrame) cancelAnimationFrame(crashAnimFrame);
+    function idleLoop() { drawCrashScene(); crashAnimFrame = requestAnimationFrame(idleLoop); }
+    idleLoop();
+  }, 100);
+  window.addEventListener('resize', () => { resizeCrashCanvas(); initCrashStars(); });
 }
 function resizeCrashCanvas() {
   if (!crashCanvas) return;
   const container = document.getElementById('crash-chart');
   if (!container) return;
-  crashCanvas.width = container.clientWidth;
-  crashCanvas.height = container.clientHeight;
+  const w = container.clientWidth || 600;
+  const h = container.clientHeight || 300;
+  crashCanvas.width = w;
+  crashCanvas.height = h;
+  crashCanvas.style.width = w + 'px';
+  crashCanvas.style.height = h + 'px';
 }
 function initCrashStars() {
   if (!crashCanvas) return;
@@ -895,6 +906,7 @@ function drawCrashScene() {
 function initCrashGame() {
   if (!currentUser) return;
   renderCrashHistory();
+  resizeCrashCanvas();
   initCrashStars();
   crashSpaceTime = 0;
   if (crashAnimFrame) cancelAnimationFrame(crashAnimFrame);
@@ -923,11 +935,12 @@ function startCrashRound() {
   // House edge: crash point skewed lower — 55% chance < 1.5x, rest exponential
   const rand = Math.random();
   let crashPoint;
-  if (rand < 0.35) { crashPoint = 1.0 + Math.random() * 0.4; }       // 35% crash before 1.4x
-  else if (rand < 0.60) { crashPoint = 1.4 + Math.random() * 0.6; }  // 25% crash 1.4–2x
-  else if (rand < 0.80) { crashPoint = 2.0 + Math.random() * 2.0; }  // 20% crash 2–4x
-  else if (rand < 0.93) { crashPoint = 4.0 + Math.random() * 4.0; }  // 13% crash 4–8x
-  else { crashPoint = 8.0 + Math.random() * 12; }                     //  7% up to 20x
+  if (rand < 0.25) { crashPoint = 1.0 + Math.random() * 0.5; }       // 25% crash before 1.5x
+  else if (rand < 0.45) { crashPoint = 1.5 + Math.random() * 0.5; }  // 20% crash 1.5–2x (total 45% before 2x → ~30% reach 2x after house)
+  else if (rand < 0.68) { crashPoint = 2.0 + Math.random() * 2.0; }  // 23% crash 2–4x
+  else if (rand < 0.85) { crashPoint = 4.0 + Math.random() * 4.0; }  // 17% crash 4–8x
+  else if (rand < 0.95) { crashPoint = 8.0 + Math.random() * 7.0; }  // 10% crash 8–15x
+  else { crashPoint = 15.0 + Math.random() * 25; }                    //  5% moon 15–40x
   const startTime = Date.now();
   let planetTimer = 0;
   crashInterval = setInterval(() => {

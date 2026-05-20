@@ -787,10 +787,10 @@ function spawnPlanet() {
   if (!crashCanvas) return;
   crashPlanetObjects.push({
     x: Math.random() * crashCanvas.width,
-    y: crashCanvas.height + 60,
+    y: -60, // spawn at top, fall down past rocket
     emoji: PLANETS[Math.floor(Math.random()*PLANETS.length)],
-    size: 20 + Math.random() * 30,
-    speed: 0.5 + Math.random() * 1.5,
+    size: 20 + Math.random() * 35,
+    speed: 1.5 + Math.random() * 3,
     opacity: 1
   });
 }
@@ -810,17 +810,32 @@ function drawCrashScene() {
   crashCtx.fillStyle = grad;
   crashCtx.fillRect(0, 0, w, h);
 
-  // Stars (fade in as we go to space)
+  // Stars — scroll downward to simulate rocket going up
+  const starSpeed = crashState === 'flying' ? Math.min(1 + crashMult * 0.4, 8) : 0.3;
   crashStarObjects.forEach(s => {
-    crashCtx.globalAlpha = s.opacity * spaceProgress;
+    const alpha = crashState === 'flying' ? Math.min(spaceProgress * 2, s.opacity) : s.opacity * 0.3;
+    crashCtx.globalAlpha = alpha;
     crashCtx.beginPath();
-    crashCtx.arc(s.x, s.y, s.r, 0, Math.PI*2);
-    crashCtx.fillStyle = '#ffffff';
-    crashCtx.fill();
-    // Twinkle
-    s.opacity = 0.3 + Math.abs(Math.sin(crashSpaceTime * 0.05 + s.x)) * 0.7;
+    // Streak effect at high speed
+    const streakLen = crashState === 'flying' ? Math.min(starSpeed * 2, 12) : 0;
+    if (streakLen > 1) {
+      crashCtx.moveTo(s.x, s.y - streakLen);
+      crashCtx.lineTo(s.x, s.y + s.r);
+      crashCtx.strokeStyle = '#ffffff';
+      crashCtx.lineWidth = s.r;
+      crashCtx.stroke();
+    } else {
+      crashCtx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      crashCtx.fillStyle = '#ffffff';
+      crashCtx.fill();
+    }
+    // Move stars downward (rocket going up illusion)
+    s.y += starSpeed * s.speed;
+    if (s.y > h + 5) { s.y = -5; s.x = Math.random() * w; }
+    s.opacity = 0.3 + Math.abs(Math.sin(crashSpaceTime * 0.03 + s.x)) * 0.7;
   });
   crashCtx.globalAlpha = 1;
+  crashCtx.lineWidth = 1;
 
   // Ground (disappears as we go up)
   if (spaceProgress < 0.7) {
@@ -844,17 +859,17 @@ function drawCrashScene() {
       crashCtx.font = `${p.size}px serif`;
       crashCtx.textAlign = 'center';
       crashCtx.fillText(p.emoji, p.x, p.y);
-      p.y -= p.speed;
-      if (p.y < -p.size) p.opacity = 0;
+      p.y += p.speed; // fall downward past the rocket
+      if (p.y > h + p.size) p.opacity = 0;
     });
     crashPlanetObjects = crashPlanetObjects.filter(p => p.opacity > 0);
     crashCtx.globalAlpha = 1;
   }
 
-  // Rocket trail + rocket
+  // Rocket trail + rocket (fixed horizontal center, only moves up)
   if (crashState === 'flying' || crashState === 'waiting') {
-    const rx = w * 0.5 + Math.sin(crashSpaceTime * 0.08) * (w * 0.1);
-    const ry = Math.max(h * 0.1, h * (0.75 - Math.min(spaceProgress, 0.65)));
+    const rx = w * 0.5;
+    const ry = Math.max(h * 0.08, h * (0.78 - Math.min(spaceProgress, 0.68)));
     crashRocketPx = rx; crashRocketPy = ry;
 
     // Flame trail
@@ -935,12 +950,13 @@ function startCrashRound() {
   // House edge: crash point skewed lower — 55% chance < 1.5x, rest exponential
   const rand = Math.random();
   let crashPoint;
-  if (rand < 0.25) { crashPoint = 1.0 + Math.random() * 0.5; }       // 25% crash before 1.5x
-  else if (rand < 0.45) { crashPoint = 1.5 + Math.random() * 0.5; }  // 20% crash 1.5–2x (total 45% before 2x → ~30% reach 2x after house)
-  else if (rand < 0.68) { crashPoint = 2.0 + Math.random() * 2.0; }  // 23% crash 2–4x
-  else if (rand < 0.85) { crashPoint = 4.0 + Math.random() * 4.0; }  // 17% crash 4–8x
-  else if (rand < 0.95) { crashPoint = 8.0 + Math.random() * 7.0; }  // 10% crash 8–15x
-  else { crashPoint = 15.0 + Math.random() * 25; }                    //  5% moon 15–40x
+  if (rand < 0.20) { crashPoint = 1.00; }                             // 20% instant crash at 1.00x (no win possible)
+  else if (rand < 0.42) { crashPoint = 1.0 + Math.random() * 0.3; }  // 22% crash 1.0–1.3x
+  else if (rand < 0.58) { crashPoint = 1.3 + Math.random() * 0.5; }  // 16% crash 1.3–1.8x
+  else if (rand < 0.72) { crashPoint = 1.8 + Math.random() * 1.2; }  // 14% crash 1.8–3x
+  else if (rand < 0.84) { crashPoint = 3.0 + Math.random() * 3.0; }  // 12% crash 3–6x
+  else if (rand < 0.93) { crashPoint = 6.0 + Math.random() * 6.0; }  //  9% crash 6–12x
+  else { crashPoint = 12.0 + Math.random() * 18; }                    //  7% moon 12–30x
   const startTime = Date.now();
   let planetTimer = 0;
   crashInterval = setInterval(() => {

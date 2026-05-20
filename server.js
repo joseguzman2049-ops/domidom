@@ -105,7 +105,17 @@ app.post('/api/auth/register', async (req, res) => {
     createdAt: Date.now(),
   };
 
+    // Auto-verify admin user
+  if (username.toLowerCase() === ADMIN_USER.toLowerCase()) {
+    state.users[key].verified = true;
+    state.users[key].token = generateToken();
+    await saveState();
+    const u = state.users[key];
+    return res.json({ token: u.token, username: u.username, coins: u.coins, isAdmin: u.isAdmin, stats: u.stats });
+  }
+
   await saveState();
+  console.log(`[VERIFY CODE] ${username}: ${verifyCode}`);
 
   if (resend && process.env.EMAIL_FROM) {
     await resend.emails.send({

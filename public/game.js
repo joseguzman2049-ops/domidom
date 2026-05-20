@@ -99,7 +99,7 @@ function makeBoardTileHTML(a, b, skin, isDouble, scale) {
   const h = Math.round(TH * scale);
   const bg = skin.bg.startsWith('linear') ? skin.bg : skin.bg;
   const glow = skin.glow ? `0 0 6px ${skin.glow}` : '0 1px 3px rgba(0,0,0,0.3)';
-  const isV = isDouble; // vertical layout for doubles
+  const isV = isDouble;
   const halfSize = isV ? w : h;
 
   return `<div style="
@@ -559,7 +559,7 @@ function renderGameState(state) {
   if (state.currentPlayer===state.myIndex) playSound('myturn');
 }
 
-// ── BOARD — SERPENTINE ─────────────────────────────────────────
+// ── BOARD — SERPENTINE (centrada) ──────────────────────────────
 function renderBoard(board, leftEnd, rightEnd) {
   const snake = document.getElementById('snake');
   if (!board.length) {
@@ -575,9 +575,11 @@ function renderBoard(board, leftEnd, rightEnd) {
   // Base tile dimensions at scale=1
   const TW = 44, TH = 22, GAP = 3;
 
-  // Calculate serpentine positions
+  // Calculate serpentine positions starting from center
   const positions = [];
-  let cx = 8, cy = 8;
+
+  // First pass: calculate positions relative to origin (0,0)
+  let cx = 0, cy = 0;
   let dir = 1; // 1=right, -1=left
 
   for (let i = 0; i < board.length; i++) {
@@ -586,27 +588,39 @@ function renderBoard(board, leftEnd, rightEnd) {
     const tw = isDouble ? TH : TW;
     const th = isDouble ? TW : TH;
 
-    // Check overflow
     const wouldEnd = dir === 1 ? cx + tw : cx - tw;
-    const overflow = dir === 1 ? wouldEnd > maxW - 8 : wouldEnd < 8;
+    const overflow = dir === 1 ? wouldEnd > maxW * 0.5 : wouldEnd < -maxW * 0.5;
 
     if (overflow && i > 0) {
-      // Turn: move down and flip direction
       cy += TH + GAP + 4;
       dir *= -1;
-      cx = dir === 1 ? 8 : maxW - 8;
+      cx = dir === 1 ? -maxW * 0.5 + 8 : maxW * 0.5 - 8;
     }
 
     positions.push({ x: dir === 1 ? cx : cx - tw, y: cy, isDouble, tw, th });
     cx = dir === 1 ? cx + tw + GAP : cx - tw - GAP;
   }
 
-  // Calculate bounding box and scale
-  let maxX = 0, maxY = 0;
-  positions.forEach(p => { maxX = Math.max(maxX, p.x + p.tw); maxY = Math.max(maxY, p.y + p.th); });
-  const scaleX = maxX > maxW ? maxW / (maxX + 8) : 1;
-  const scaleY = maxY > maxH ? maxH / (maxY + 8) : 1;
+  // Find bounding box of all tiles
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  positions.forEach(p => {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x + p.tw);
+    maxY = Math.max(maxY, p.y + p.th);
+  });
+
+  const totalW = maxX - minX;
+  const totalH = maxY - minY;
+
+  // Scale to fit container
+  const scaleX = totalW > maxW ? maxW / (totalW + 16) : 1;
+  const scaleY = totalH > maxH ? maxH / (totalH + 16) : 1;
   const scale = Math.min(scaleX, scaleY, 1);
+
+  // Offset to center all tiles in the container
+  const offsetX = (maxW - totalW * scale) / 2 - minX * scale;
+  const offsetY = (maxH - totalH * scale) / 2 - minY * scale;
 
   const skin = equippedSkin;
   let html = '';
@@ -614,9 +628,9 @@ function renderBoard(board, leftEnd, rightEnd) {
     const [a, b] = board[i];
     const w = Math.round(p.tw * scale);
     const h = Math.round(p.th * scale);
-    const x = Math.round(p.x * scale);
-    const y = Math.round(p.y * scale);
-    const bg = skin.bg.startsWith('linear') ? skin.bg : skin.bg;
+    const x = Math.round(p.x * scale + offsetX);
+    const y = Math.round(p.y * scale + offsetY);
+    const bg = skin.bg;
     const glow = skin.glow ? `0 0 6px ${skin.glow}` : '0 1px 3px rgba(0,0,0,0.3)';
     const br = Math.max(2, Math.round(3 * scale));
     const bw = Math.max(1, Math.round(scale));
@@ -648,7 +662,7 @@ function renderBoard(board, leftEnd, rightEnd) {
   });
 
   snake.style.position = 'relative';
-  snake.style.height = `${Math.round(maxY * scale) + 16}px`;
+  snake.style.height = `${Math.round(maxH)}px`;
   snake.innerHTML = html;
 }
 
@@ -697,7 +711,6 @@ function renderHand(hand, legalMoves, currentPlayer, myIndex) {
     </div>`;
   }).join('');
 
-  // Buttons
   const hasLegal = legalMoves.length > 0;
   const btnLeft = document.getElementById('btn-place-left');
   const btnRight = document.getElementById('btn-place-right');
@@ -971,7 +984,6 @@ function drawCrashCanvas(mult, crashed) {
   if (!crashCtx||!crashCanvas) return;
   const w=crashCanvas.width, h=crashCanvas.height;
   crashCtx.clearRect(0,0,w,h);
-  // Grid
   crashCtx.strokeStyle='rgba(255,255,255,0.04)'; crashCtx.lineWidth=1;
   for (let i=1;i<5;i++) {
     crashCtx.beginPath(); crashCtx.moveTo(0,h*i/5); crashCtx.lineTo(w,h*i/5); crashCtx.stroke();

@@ -248,7 +248,7 @@ function connectSocket() {
   socket.on('coins:update', (coins) => { if (currentUser) { currentUser.coins = coins; updateWalletDisplay(); } });
   socket.on('online:count', (count) => { document.querySelectorAll('#online-count').forEach(el => el.textContent = count); });
   socket.on('leaderboard:update', renderLeaderboard);
-  socket.on('room:update', (room) => { currentRoom = room; renderRoomLobby(room); });
+  socket.on('room:update', (room) => { currentRoom = { ...currentRoom, ...room }; renderRoomLobby(currentRoom); });
   socket.on('match:start', () => { document.getElementById('game-lobby').style.display = 'none'; document.getElementById('game-main').style.display = 'grid'; });
   socket.on('game:state', renderGameState);
   socket.on('timer:start', ({ seconds }) => { timerSeconds = seconds; startTimerUI(seconds); });
@@ -472,7 +472,7 @@ function showWithdrawalModal() {
     <div style="background:rgba(0,231,1,0.05);border:1px solid rgba(0,231,1,0.2);border-radius:6px;padding:12px;margin-bottom:16px;">
       <div style="font-size:0.72rem;color:var(--text2);margin-bottom:4px;">SALDO DISPONIBLE</div>
       <div style="font-size:1.5rem;font-weight:800;color:var(--accent);" id="wd-balance-show">${(currentUser.coins||0).toLocaleString()} 🪙</div>
-      <div style="font-size:0.72rem;color:var(--text3);margin-top:4px;">Mínimo retiro: 1,000 🪙 · Comisión: 5%</div>
+      <div style="font-size:0.72rem;color:var(--text3);margin-top:4px;">Mínimo retiro: 1,000 🪙 · Comisión: 10%</div>
     </div>
     <div class="input-group"><label>Cantidad a retirar (🪙)</label><input class="inp" id="wd-amount" type="number" min="1000" placeholder="Ej: 5000" oninput="calcWithdrawal()"/></div>
     <div class="input-group"><label>Banco</label>
@@ -509,7 +509,7 @@ function calcWithdrawal() {
   const amount = parseInt(document.getElementById('wd-amount').value)||0;
   const preview = document.getElementById('wd-preview');
   if (amount >= 1000) {
-    const fee = Math.floor(amount * 0.05);
+    const fee = Math.floor(amount * 0.10);
     const net = amount - fee;
     document.getElementById('wd-p-amount').textContent = amount.toLocaleString()+' 🪙';
     document.getElementById('wd-p-fee').textContent = '-'+fee.toLocaleString()+' 🪙';
@@ -603,7 +603,7 @@ function switchFriendTab(tab) {
   document.getElementById('fr-join').style.display = tab==='join'?'block':'none';
   document.querySelectorAll('#modal-friend-room .tab-pill').forEach((t,i) => t.classList.toggle('active',(i===0&&tab==='create')||(i===1&&tab==='join')));
 }
-function doCreateRoom() { const buyIn=parseInt(document.getElementById('fr-buyin').value)||0; currentRoom = {buyIn, pot: buyIn}; closeModal('modal-friend-room'); showScreen('game'); socket.emit('room:create',{buyIn}); renderRoomLobby(currentRoom); }
+function doCreateRoom() { const buyIn=parseInt(document.getElementById('fr-buyin').value)||0; currentRoom = {buyIn, players: []}; closeModal('modal-friend-room'); showScreen('game'); socket.emit('room:create',{buyIn}); renderRoomLobby(currentRoom); }
 function doJoinRoom() { const code=document.getElementById('fr-code').value.trim().toUpperCase(); if(!code) return; closeModal('modal-friend-room'); showScreen('game'); socket.emit('room:join',{roomId:code}); }
 function leaveRoom() { showScreen('home'); currentRoom = null; }
 function doAddBot() { socket.emit('room:add-bot'); }

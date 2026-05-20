@@ -260,7 +260,7 @@ function connectSocket() {
   socket.on('match:end', showWinOverlay);
   socket.on('chat:message', appendChatMessage);
   socket.on('slam', ({ username }) => { handleSlam(username); });
-  socket.on('queue:joined', ({ province }) => { currentQueueProvince = province; });
+  socket.on('queue:joined', ({ province, buyIn }) => { currentQueueProvince = { id: province, buyIn }; });
   socket.on('room:created', ({ roomId }) => { showScreen('game'); document.getElementById('game-room-code').textContent = roomId; });
   socket.on('room:error', (msg) => showToast(msg, 'error'));
   socket.on('friends:list', renderFriendsList);
@@ -407,7 +407,8 @@ function joinProvince(provinceId, buyIn) {
   if (currentUser.coins < buyIn) { showToast('Saldo insuficiente 🪙','error'); return; }
   const prov = document.querySelector(`.prov-card[onclick*="${provinceId}"]`);
   document.getElementById('queue-province-name').textContent = prov?.querySelector('.prov-name')?.textContent||'Cola';
-  document.getElementById('queue-buyin-badge').textContent = `Pote: ${buyIn.toLocaleString()} 🪙`;
+  document.getElementById('queue-buyin-badge').textContent = `Pote: ${(buyIn * 4).toLocaleString()} 🪙`;
+  currentQueueProvince = { id: provinceId, buyIn };
   openModal('modal-queue');
   socket.emit('queue:join', { provinceId });
 }
@@ -602,7 +603,7 @@ function switchFriendTab(tab) {
   document.getElementById('fr-join').style.display = tab==='join'?'block':'none';
   document.querySelectorAll('#modal-friend-room .tab-pill').forEach((t,i) => t.classList.toggle('active',(i===0&&tab==='create')||(i===1&&tab==='join')));
 }
-function doCreateRoom() { const buyIn=parseInt(document.getElementById('fr-buyin').value)||0; closeModal('modal-friend-room'); showScreen('game'); socket.emit('room:create',{buyIn}); }
+function doCreateRoom() { const buyIn=parseInt(document.getElementById('fr-buyin').value)||0; currentRoom = {buyIn, pot: buyIn}; closeModal('modal-friend-room'); showScreen('game'); socket.emit('room:create',{buyIn}); renderRoomLobby(currentRoom); }
 function doJoinRoom() { const code=document.getElementById('fr-code').value.trim().toUpperCase(); if(!code) return; closeModal('modal-friend-room'); showScreen('game'); socket.emit('room:join',{roomId:code}); }
 function leaveRoom() { showScreen('home'); currentRoom = null; }
 function doAddBot() { socket.emit('room:add-bot'); }
@@ -622,7 +623,8 @@ function startPractice(level) { closeModal('modal-practice'); showScreen('game')
 
 function renderRoomLobby(room) {
   document.getElementById('game-room-code').textContent = room.id;
-  document.getElementById('game-pot-badge').textContent = `Pote: ${(room.pot||0).toLocaleString()} 🪙`;
+  const potTotal = room.buyIn ? room.buyIn * 4 : (room.pot||0);
+  document.getElementById('game-pot-badge').textContent = `Pote: ${potTotal.toLocaleString()} 🪙`;
   const seats = document.getElementById('lobby-seats-display');
   seats.innerHTML = Array.from({length:4},(_,i) => {
     const p = room.players.find(pl=>pl.seatIndex===i);
@@ -714,6 +716,7 @@ function renderBoard(board, leftEnd, rightEnd) {
   const minX = L;
   const maxX = Math.max(L * 4, avail);
 
+  // Start at center for first tile
   let P = { x: L, y: L };
   let dir = 'R';
   let lastH = 'R';
@@ -779,13 +782,14 @@ function renderBoard(board, leftEnd, rightEnd) {
   snake.style.width  = totalW + 'px';
   snake.style.height = totalH + 'px';
 
-  // Auto-escalar para que quepa en el contenedor
+  // Auto-escalar para que quepa en el contenedor y centrar
   requestAnimationFrame(() => {
     const avW = (container.clientWidth  || 400) - 44;
     const avH = Math.max(160, (container.clientHeight || 300) - 44);
     const scale = Math.min(1, avW / totalW, avH / totalH);
-    snake.style.transform = 'scale(' + Math.max(0.14, scale) + ')';
-    snake.style.transformOrigin = 'top left';
+    snake.style.transform = 'scale(' + Math.max(0.14, scale) + ') translateX(-50%)';
+    snake.style.transformOrigin = 'top center';
+    snake.style.marginLeft = '50%';
   });
 }
 

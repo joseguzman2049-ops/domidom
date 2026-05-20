@@ -1,24 +1,11 @@
+// DomiDom — Server v2
 'use strict';
 
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const crypto = require('crypto');
 const path = require('path');
-
-// ── Supabase (optional) ────────────────────────────────────────
-let supabase = null;
-if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
-  const { createClient } = require('@supabase/supabase-js');
-  supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-}
-
-// ── Resend (optional) ──────────────────────────────────────────
-let resend = null;
-if (process.env.RESEND_API_KEY) {
-  const { Resend } = require('resend');
-  resend = new Resend(process.env.RESEND_API_KEY);
-}
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,588 +14,616 @@ const io = new Server(server, { cors: { origin: '*' } });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── Config ─────────────────────────────────────────────────────
+const ADMIN_USER = (process.env.ADMIN_USER || 'admin').toLowerCase();
+const SUPPORT_USER = (process.env.SUPPORT_USER || 'soporte').toLowerCase();
+const SUPPORT_PASS = process.env.SUPPORT_PASS || 'soporte123';
+const BANK_NAME = process.env.BANK_NAME || 'Banco Popular Dominicano';
+const BANK_ACCOUNT = process.env.BANK_ACCOUNT || '812-000000-0';
+const SUPPORT_WHATSAPP = process.env.SUPPORT_WHATSAPP || '';
+const SUPPORT_EMAIL = process.env.SUPPORT_EMAIL || 'soporte@domidom.com';
 const PORT = process.env.PORT || 3000;
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const STARTING_COINS = 1000;
+
+// ── Resend (optional) ─────────────────────────────────────────
+let resend = null;
+if (process.env.RESEND_API_KEY) {
+  try { const { Resend } = require('resend'); resend = new Resend(process.env.RESEND_API_KEY); } catch {}
+}
+
+// ── Supabase (optional) ───────────────────────────────────────
+let supabase = null;
+if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+  try { const { createClient } = require('@supabase/supabase-js'); supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY); } catch {}
+}
 
 // ── In-memory state ────────────────────────────────────────────
-let state = {
-  users: {},
-  rooms: {},
-  queues: {},
-  onlineCount: 0,
-};
+let state = { users: {}, rooms: {}, onlineSockets: {} };
 
 // ── Persistence ────────────────────────────────────────────────
-async function saveState() {
-  if (!supabase) return;
-  await supabase.from('domidom_state').upsert({ id: 'main', data: state });
-}
-
 async function loadState() {
   if (!supabase) return;
-  const { data } = await supabase.from('domidom_state').select('data').eq('id', 'main').single();
-  if (data?.data) state = data.data;
+  try {
+    const { data } = await supabase.from('domidom_state').select('data').eq('id', 'main').single();
+    if (data?.data) state = { ...state, ...data.data };
+  } catch {}
 }
 
-// ── Auth helpers ───────────────────────────────────────────────
-function hashPassword(password, salt) {
-  return crypto.scryptSync(password, salt, 64).toString('hex');
+async function saveState() {
+  if (!supabase) return;
+  try {
+    await supabase.from('domidom_state').upsert({ id: 'main', data: { users: state.users } });
+  } catch {}
 }
 
-function generateToken() {
-  return crypto.randomBytes(32).toString('hex');
+// ── Helpers ────────────────────────────────────────────────────
+function hashPassword(pass) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(pass, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
 }
 
-function generateCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+function verifyPassword(pass, stored) {
+  try {
+    const [salt, hash] = stored.split(':');
+    return crypto.scryptSync(pass, salt, 64).toString('hex') === hash;
+  } catch { return false; }
 }
 
-function getUserByToken(token) {
-  return Object.values(state.users).find(u => u.token === token);
+function generateToken() { return crypto.randomBytes(32).toString('hex'); }
+function getUserByToken(token) { return Object.values(state.users).find(u => u.token === token) || null; }
+
+function sanitizeUser(u) {
+  return {
+    username: u.username, email: u.email, coins: u.coins,
+    isAdmin: u.isAdmin, isSupportAgent: u.isSupportAgent,
+    stats: u.stats, transactions: (u.transactions || []).slice(-50),
+    token: u.token
+  };
 }
 
-function getUserByUsername(username) {
-  return state.users[username.toLowerCase()];
+function authMiddleware(req, res, next) {
+  const token = req.headers['x-token'];
+  if (!token) return res.status(401).json({ error: 'No autenticado' });
+  const user = getUserByToken(token);
+  if (!user) return res.status(401).json({ error: 'Token inválido' });
+  if (user.banned) return res.status(403).json({ error: 'Cuenta suspendida' });
+  req.user = user;
+  next();
 }
 
-// ── Provinces config ───────────────────────────────────────────
+function adminMiddleware(req, res, next) {
+  if (!req.user.isAdmin) return res.status(403).json({ error: 'No autorizado' });
+  next();
+}
+
+// ── Provinces ──────────────────────────────────────────────────
 const PROVINCES = [
-  { id: 'santo-domingo', name: 'Santo Domingo', buyIn: 100,  featured: false },
-  { id: 'santiago',      name: 'Santiago',      buyIn: 250,  featured: false },
-  { id: 'la-vega',       name: 'La Vega',       buyIn: 500,  featured: false },
-  { id: 'san-pedro',     name: 'San Pedro',     buyIn: 1000, featured: false },
-  { id: 'punta-cana',    name: 'Punta Cana',    buyIn: 2500, featured: true  },
+  { id: 'sde',      name: 'Santo Domingo', buyIn: 50,   featured: false },
+  { id: 'santiago', name: 'Santiago',      buyIn: 100,  featured: false },
+  { id: 'laplata',  name: 'La Plata',      buyIn: 250,  featured: false },
+  { id: 'cibao',    name: 'El Cibao',      buyIn: 500,  featured: false },
+  { id: 'elite',    name: 'Mesa Elite',    buyIn: 1000, featured: true  },
 ];
 
-// ── REST API ───────────────────────────────────────────────────
-
+// ── AUTH ───────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
   const { username, password, email, phone } = req.body;
-  if (!username || !password || !email) return res.status(400).json({ error: 'Campos requeridos' });
-  if (username.length < 3 || username.length > 20) return res.status(400).json({ error: 'Usuario debe tener 3-20 caracteres' });
-  if (getUserByUsername(username)) return res.status(400).json({ error: 'Usuario ya existe' });
+  if (!username || !password || !email) return res.status(400).json({ error: 'Faltan campos' });
+  if (username.length < 3 || username.length > 20) return res.status(400).json({ error: 'Usuario 3-20 caracteres' });
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: 'Solo letras, números y _' });
+  if (password.length < 6) return res.status(400).json({ error: 'Contraseña mínimo 6 caracteres' });
 
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = hashPassword(password, salt);
-  const verifyCode = generateCode();
   const key = username.toLowerCase();
+  if (state.users[key]) return res.status(400).json({ error: 'Usuario ya existe' });
+
+  const isAdmin = key === ADMIN_USER;
+  const isSupportAgent = key === SUPPORT_USER;
+  const token = generateToken();
 
   state.users[key] = {
     username, email, phone: phone || '',
-    passwordHash: hash, salt, verifyCode,
-    verified: false, token: null,
-    coins: 1000,
-    isAdmin: username.toLowerCase() === ADMIN_USER.toLowerCase(),
+    passwordHash: hashPassword(password),
+    token, coins: STARTING_COINS,
+    isAdmin, isSupportAgent,
+    verified: true,
     banned: false,
+    friends: [], friendRequests: [],
     stats: { games: 0, wins: 0, earnings: 0 },
-    transactions: [],
-    createdAt: Date.now(),
+    transactions: [{ type: 'deposit', amount: STARTING_COINS, date: new Date().toISOString(), note: 'Bono bienvenida' }],
+    createdAt: new Date().toISOString()
   };
 
-    // Auto-verify admin user
-  if (username.toLowerCase() === ADMIN_USER.toLowerCase()) {
-    state.users[key].verified = true;
-    state.users[key].token = generateToken();
-    await saveState();
-    const u = state.users[key];
-    return res.json({ token: u.token, username: u.username, coins: u.coins, isAdmin: u.isAdmin, stats: u.stats });
-  }
-
   await saveState();
-  console.log(`[VERIFY CODE] ${username}: ${verifyCode}`);
-
-  if (resend && process.env.EMAIL_FROM) {
-    await resend.emails.send({
-      from: process.env.EMAIL_FROM,
-      to: email,
-      subject: 'DomiDom — Verifica tu cuenta',
-      html: `<h2>¡Bienvenido a DomiDom!</h2><p>Tu código: <strong style="font-size:24px">${verifyCode}</strong></p>`,
-    }).catch(() => {});
-  }
-
-  res.json({ needsVerification: true });
-});
-
-app.post('/api/auth/verify', async (req, res) => {
-  const { username, code } = req.body;
-  const user = getUserByUsername(username);
-  if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
-  if (user.verified) return res.status(400).json({ error: 'Ya verificado' });
-  if (user.verifyCode !== code) return res.status(400).json({ error: 'Código incorrecto' });
-  user.verified = true;
-  user.token = generateToken();
-  await saveState();
-  res.json({ token: user.token, username: user.username, coins: user.coins, isAdmin: user.isAdmin, stats: user.stats });
+  console.log(`[REGISTER] ${username} (admin:${isAdmin})`);
+  return res.json(sanitizeUser(state.users[key]));
 });
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  const user = getUserByUsername(username);
-  if (!user) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
-  if (!user.verified) return res.status(403).json({ error: 'Cuenta no verificada' });
+  if (!username || !password) return res.status(400).json({ error: 'Faltan campos' });
+  const key = username.toLowerCase();
+
+  // Support user auto-create
+  if (key === SUPPORT_USER) {
+    if (password !== SUPPORT_PASS) return res.status(401).json({ error: 'Contraseña incorrecta' });
+    if (!state.users[key]) {
+      state.users[key] = {
+        username: SUPPORT_USER, email: SUPPORT_EMAIL, phone: '',
+        passwordHash: hashPassword(SUPPORT_PASS),
+        token: generateToken(), coins: 0,
+        isAdmin: false, isSupportAgent: true,
+        verified: true, banned: false,
+        friends: [], friendRequests: [],
+        stats: { games: 0, wins: 0, earnings: 0 },
+        transactions: [], createdAt: new Date().toISOString()
+      };
+    }
+    state.users[key].token = generateToken();
+    await saveState();
+    return res.json(sanitizeUser(state.users[key]));
+  }
+
+  const user = state.users[key];
+  if (!user) return res.status(401).json({ error: 'Usuario no encontrado' });
   if (user.banned) return res.status(403).json({ error: 'Cuenta suspendida' });
-  const hash = hashPassword(password, user.salt);
-  if (hash !== user.passwordHash) return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+  if (!verifyPassword(password, user.passwordHash)) return res.status(401).json({ error: 'Contraseña incorrecta' });
   user.token = generateToken();
   await saveState();
-  res.json({ token: user.token, username: user.username, coins: user.coins, isAdmin: user.isAdmin, stats: user.stats });
+  return res.json(sanitizeUser(user));
 });
 
-app.get('/api/me', (req, res) => {
-  const user = getUserByToken(req.headers['x-token']);
-  if (!user) return res.status(401).json({ error: 'No autenticado' });
-  res.json({ username: user.username, email: user.email, coins: user.coins, isAdmin: user.isAdmin, stats: user.stats, transactions: user.transactions || [] });
-});
+// ── USER ROUTES ────────────────────────────────────────────────
+app.get('/api/me', authMiddleware, (req, res) => res.json(sanitizeUser(req.user)));
 
 app.get('/api/provinces', (req, res) => {
-  const result = PROVINCES.map(p => ({
+  res.json(PROVINCES.map(p => ({
     ...p,
-    playersInQueue: (state.queues[p.id] || []).length,
-    activeTables: Object.values(state.rooms).filter(r => r.provinceId === p.id && r.started).length,
-  }));
-  res.json(result);
+    playersInQueue: Object.values(state.rooms).filter(r => r.provinceId === p.id && !r.gameStarted).reduce((a, r) => a + r.players.length, 0),
+    activeTables: Object.values(state.rooms).filter(r => r.provinceId === p.id && r.gameStarted).length,
+  })));
 });
 
 app.get('/api/leaderboard', (req, res) => {
-  const users = Object.values(state.users)
-    .filter(u => u.verified && !u.banned)
-    .sort((a, b) => (b.stats?.earnings || 0) - (a.stats?.earnings || 0))
+  res.json(Object.values(state.users)
+    .filter(u => u.stats?.earnings > 0)
+    .sort((a, b) => b.stats.earnings - a.stats.earnings)
     .slice(0, 10)
-    .map(u => ({ username: u.username, earnings: u.stats?.earnings || 0, wins: u.stats?.wins || 0 }));
-  res.json(users);
+    .map(u => ({ username: u.username, earnings: u.stats.earnings })));
 });
 
-app.get('/api/online', (req, res) => {
-  res.json({ count: state.onlineCount });
+app.get('/api/online', (req, res) => res.json({ count: Object.keys(state.onlineSockets).length }));
+
+app.get('/api/deposit-info', (req, res) => {
+  res.json({ bankName: BANK_NAME, bankAccount: BANK_ACCOUNT, supportWhatsapp: SUPPORT_WHATSAPP, supportEmail: SUPPORT_EMAIL });
 });
 
-app.get('/api/admin/users', (req, res) => {
-  const caller = getUserByToken(req.headers['x-token']);
-  if (!caller?.isAdmin) return res.status(403).json({ error: 'Forbidden' });
-  const users = Object.values(state.users).map(u => ({
-    username: u.username, email: u.email, coins: u.coins, stats: u.stats, banned: u.banned, verified: u.verified,
-  }));
-  res.json(users);
-});
-
-app.post('/api/admin/grant', async (req, res) => {
-  const caller = getUserByToken(req.headers['x-token']);
-  if (!caller?.isAdmin) return res.status(403).json({ error: 'Forbidden' });
-  const { username, amount, action } = req.body;
-  const user = getUserByUsername(username);
-  if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
-  const delta = action === 'take' ? -amount : amount;
-  user.coins = Math.max(0, user.coins + delta);
-  user.transactions = user.transactions || [];
-  user.transactions.push({ type: delta > 0 ? 'admin_credit' : 'admin_debit', amount: delta, date: Date.now() });
+app.post('/api/withdraw-request', authMiddleware, async (req, res) => {
+  const { amount, bankAccount } = req.body;
+  if (!amount || amount < 1) return res.status(400).json({ error: 'Monto inválido' });
+  if (req.user.coins < amount) return res.status(400).json({ error: 'Saldo insuficiente' });
+  req.user.coins -= amount;
+  req.user.transactions = req.user.transactions || [];
+  req.user.transactions.push({ type: 'withdrawal_pending', amount: -amount, date: new Date().toISOString(), bankAccount });
   await saveState();
+  console.log(`[WITHDRAW] ${req.user.username} solicitó ${amount} coins → ${bankAccount}`);
   res.json({ ok: true });
 });
 
-app.post('/api/admin/ban', async (req, res) => {
-  const caller = getUserByToken(req.headers['x-token']);
-  if (!caller?.isAdmin) return res.status(403).json({ error: 'Forbidden' });
+app.post('/api/crash/result', authMiddleware, async (req, res) => {
+  const { bet, mult, won } = req.body;
+  if (!bet || bet < 1) return res.status(400).json({ error: 'Bet inválido' });
+  const user = req.user;
+  const winAmount = won ? Math.floor(bet * mult) : 0;
+  if (won) {
+    user.coins += winAmount;
+    user.stats.earnings = (user.stats.earnings || 0) + (winAmount - bet);
+  } else {
+    user.stats.earnings = (user.stats.earnings || 0) - bet;
+  }
+  user.transactions = user.transactions || [];
+  user.transactions.push({ type: won ? 'crash_win' : 'crash_loss', amount: won ? winAmount - bet : -bet, date: new Date().toISOString() });
+  await saveState();
+  const sockId = Object.keys(state.onlineSockets).find(k => state.onlineSockets[k] === user.username.toLowerCase());
+  if (sockId) io.to(sockId).emit('coins:update', user.coins);
+  res.json({ coins: user.coins });
+});
+
+app.post('/api/mines/result', authMiddleware, async (req, res) => {
+  const { bet, won, gems, mult } = req.body;
+  if (!bet || bet < 1) return res.status(400).json({ error: 'Bet inválido' });
+  const user = req.user;
+  const winAmount = won ? Math.floor(bet * (mult || 1)) : 0;
+  if (won) {
+    user.coins += winAmount;
+    user.stats.earnings = (user.stats.earnings || 0) + (winAmount - bet);
+  } else {
+    user.stats.earnings = (user.stats.earnings || 0) - bet;
+  }
+  user.transactions = user.transactions || [];
+  user.transactions.push({ type: won ? 'mines_win' : 'mines_loss', amount: won ? winAmount - bet : -bet, date: new Date().toISOString(), gems });
+  await saveState();
+  res.json({ coins: user.coins });
+});
+
+// ── ADMIN ──────────────────────────────────────────────────────
+app.get('/api/admin/users', authMiddleware, adminMiddleware, (req, res) => {
+  res.json(Object.values(state.users).map(u => ({
+    username: u.username, email: u.email, coins: u.coins, banned: u.banned, stats: u.stats
+  })));
+});
+
+app.post('/api/admin/grant', authMiddleware, adminMiddleware, async (req, res) => {
+  const { username, amount, action } = req.body;
+  const user = state.users[username.toLowerCase()];
+  if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+  if (action === 'give') { user.coins += amount; user.transactions.push({ type: 'admin_credit', amount, date: new Date().toISOString() }); }
+  else { user.coins = Math.max(0, user.coins - amount); user.transactions.push({ type: 'admin_debit', amount: -amount, date: new Date().toISOString() }); }
+  await saveState();
+  const sockId = Object.keys(state.onlineSockets).find(k => state.onlineSockets[k] === username.toLowerCase());
+  if (sockId) io.to(sockId).emit('coins:update', user.coins);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/ban', authMiddleware, adminMiddleware, async (req, res) => {
   const { username, banned } = req.body;
-  const user = getUserByUsername(username);
+  const user = state.users[username.toLowerCase()];
   if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
   user.banned = banned;
   await saveState();
   res.json({ ok: true });
 });
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// ── Socket.IO ──────────────────────────────────────────────────
-const socketUsers = new Map();
-
+// ── SOCKET.IO ──────────────────────────────────────────────────
 io.on('connection', (socket) => {
-  state.onlineCount = io.engine.clientsCount;
-  io.emit('online:count', state.onlineCount);
-
   socket.on('auth', ({ token }) => {
     const user = getUserByToken(token);
-    if (!user || user.banned) { socket.emit('auth:error', 'No autorizado'); return; }
-    socketUsers.set(socket.id, user.username.toLowerCase());
-    socket.emit('auth:ok', { username: user.username, coins: user.coins, isAdmin: user.isAdmin });
+    if (!user || user.banned) return;
+    state.onlineSockets[socket.id] = user.username.toLowerCase();
+    socket.emit('auth:ok', sanitizeUser(user));
+    io.emit('online:count', Object.keys(state.onlineSockets).length);
+    io.emit('leaderboard:update', getLeaderboard());
+  });
+
+  socket.on('disconnect', () => {
+    const username = state.onlineSockets[socket.id];
+    delete state.onlineSockets[socket.id];
+    io.emit('online:count', Object.keys(state.onlineSockets).length);
+    if (username) {
+      Object.values(state.rooms).forEach(room => {
+        const idx = room.players.findIndex(p => p.username.toLowerCase() === username);
+        if (idx !== -1 && !room.gameStarted) {
+          room.players.splice(idx, 1);
+          io.to(room.id).emit('room:update', room);
+        }
+      });
+    }
   });
 
   socket.on('queue:join', ({ provinceId }) => {
-    const username = socketUsers.get(socket.id);
-    if (!username) return;
-    const user = getUserByUsername(username);
-    if (!user) return;
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
+    if (!user) return socket.emit('queue:error', 'No autenticado');
     const province = PROVINCES.find(p => p.id === provinceId);
-    if (!province) { socket.emit('queue:error', 'Provincia no encontrada'); return; }
-    if (user.coins < province.buyIn) { socket.emit('queue:error', 'Saldo insuficiente'); return; }
-    if (!state.queues[provinceId]) state.queues[provinceId] = [];
-    if (!state.queues[provinceId].includes(username)) state.queues[provinceId].push(username);
-    socket.emit('queue:joined', { province });
-    if (state.queues[provinceId].length >= 4) {
-      const players = state.queues[provinceId].splice(0, 4);
-      createMatch(provinceId, province.buyIn, players, false);
+    if (!province) return socket.emit('queue:error', 'Provincia inválida');
+    if (user.coins < province.buyIn) return socket.emit('queue:error', 'Saldo insuficiente');
+
+    let room = Object.values(state.rooms).find(r => r.provinceId === provinceId && !r.gameStarted && r.players.length < 4);
+    if (!room) {
+      const roomId = `DOMI-${Math.random().toString(36).substr(2,4).toUpperCase()}`;
+      room = { id: roomId, provinceId, buyIn: province.buyIn, players: [], host: username, gameStarted: false, pot: 0, scores: [0,0], isPublic: true };
+      state.rooms[roomId] = room;
     }
+
+    if (!room.players.find(p => p.username === username)) {
+      room.players.push({ username, seatIndex: room.players.length, team: room.players.length < 2 ? 0 : 1, isBot: false });
+      room.pot += province.buyIn;
+      user.coins -= province.buyIn;
+      socket.join(room.id);
+      io.to(room.id).emit('room:update', room);
+    }
+
+    socket.emit('queue:joined', { province });
+    if (room.players.length === 4) startGame(room);
   });
 
   socket.on('queue:leave', ({ provinceId }) => {
-    const username = socketUsers.get(socket.id);
-    if (state.queues[provinceId]) {
-      state.queues[provinceId] = state.queues[provinceId].filter(u => u !== username);
+    const username = state.onlineSockets[socket.id];
+    if (!username) return;
+    const room = Object.values(state.rooms).find(r => r.provinceId === provinceId && !r.gameStarted && r.players.some(p => p.username === username));
+    if (room) {
+      const idx = room.players.findIndex(p => p.username === username);
+      if (idx !== -1) {
+        const user = state.users[username];
+        if (user) user.coins += room.buyIn;
+        room.pot -= room.buyIn;
+        room.players.splice(idx, 1);
+        socket.leave(room.id);
+        io.to(room.id).emit('room:update', room);
+      }
     }
   });
 
-  socket.on('room:create', ({ buyIn }) => {
-    const username = socketUsers.get(socket.id);
-    if (!username) return;
-    const roomId = 'DOMI-' + Math.random().toString(36).substr(2, 4).toUpperCase();
-    state.rooms[roomId] = {
-      id: roomId, host: username,
-      players: [{ username, seatIndex: 0, team: 0, isBot: false }],
-      buyIn: buyIn || 0, pot: 0, started: false, provinceId: null,
-    };
+  socket.on('room:create', ({ buyIn = 0 }) => {
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
+    if (!user) return;
+    const roomId = `DOMI-${Math.random().toString(36).substr(2,4).toUpperCase()}`;
+    const room = { id: roomId, provinceId: null, buyIn, players: [{ username, seatIndex: 0, team: 0, isBot: false }], host: username, gameStarted: false, pot: buyIn > 0 ? buyIn : 0, scores: [0,0], isPublic: false };
+    if (buyIn > 0) user.coins -= buyIn;
+    state.rooms[roomId] = room;
     socket.join(roomId);
     socket.emit('room:created', { roomId });
-    io.to(roomId).emit('room:update', state.rooms[roomId]);
+    socket.emit('room:update', room);
   });
 
   socket.on('room:join', ({ roomId }) => {
-    const username = socketUsers.get(socket.id);
-    if (!username) return;
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
+    if (!user) return;
     const room = state.rooms[roomId];
-    if (!room) { socket.emit('room:error', 'Sala no encontrada'); return; }
-    if (room.started) { socket.emit('room:error', 'La partida ya comenzó'); return; }
-    if (room.players.length >= 4) { socket.emit('room:error', 'Sala llena'); return; }
-    const seatIndex = room.players.length;
-    room.players.push({ username, seatIndex, team: seatIndex < 2 ? 0 : 1, isBot: false });
-    socket.join(roomId);
-    io.to(roomId).emit('room:update', room);
+    if (!room) return socket.emit('room:error', 'Sala no encontrada');
+    if (room.players.length >= 4) return socket.emit('room:error', 'Sala llena');
+    if (room.buyIn > 0 && user.coins < room.buyIn) return socket.emit('room:error', 'Saldo insuficiente');
+    if (!room.players.find(p => p.username === username)) {
+      room.players.push({ username, seatIndex: room.players.length, team: room.players.length < 2 ? 0 : 1, isBot: false });
+      if (room.buyIn > 0) { user.coins -= room.buyIn; room.pot += room.buyIn; }
+      socket.join(roomId);
+      io.to(roomId).emit('room:update', room);
+    }
   });
 
   socket.on('room:add-bot', () => {
-    const username = socketUsers.get(socket.id);
-    const room = Object.values(state.rooms).find(r => r.host === username && !r.started);
+    const username = state.onlineSockets[socket.id];
+    const room = Object.values(state.rooms).find(r => r.host === username && !r.gameStarted);
     if (!room || room.players.length >= 4) return;
-    const seatIndex = room.players.length;
-    room.players.push({ username: `Bot${seatIndex}`, seatIndex, team: seatIndex < 2 ? 0 : 1, isBot: true });
+    const botNames = ['Bot_Azabache','Bot_Cibaeño','Bot_Capicúa','Bot_Tranca'];
+    room.players.push({ username: botNames[room.players.length - 1] || 'Bot', seatIndex: room.players.length, team: room.players.length <= 1 ? 0 : 1, isBot: true });
+    if (room.buyIn > 0) room.pot += room.buyIn;
     io.to(room.id).emit('room:update', room);
   });
 
   socket.on('room:start', () => {
-    const username = socketUsers.get(socket.id);
-    const room = Object.values(state.rooms).find(r => r.host === username && !r.started);
-    if (!room) return;
-    if (room.players.length < 4) { socket.emit('room:error', 'Necesitas 4 jugadores'); return; }
-    startGameInRoom(room);
+    const username = state.onlineSockets[socket.id];
+    const room = Object.values(state.rooms).find(r => r.host === username && !r.gameStarted);
+    if (!room || room.players.length < 2) return socket.emit('room:error', 'Necesitas al menos 2 jugadores');
+    // Fill remaining seats with bots
+    const botNames = ['Bot_Azabache','Bot_Cibaeño','Bot_Capicúa','Bot_Tranca'];
+    while (room.players.length < 4) {
+      room.players.push({ username: botNames[room.players.length - 1], seatIndex: room.players.length, team: room.players.length < 2 ? 0 : 1, isBot: true });
+    }
+    startGame(room);
   });
 
   socket.on('game:play', ({ tile, side }) => {
-    const username = socketUsers.get(socket.id);
-    const room = findRoomByPlayer(username);
-    if (!room?.game) return;
-    handlePlay(room, username, tile, side);
+    const username = state.onlineSockets[socket.id];
+    if (!username) return;
+    const room = Object.values(state.rooms).find(r => r.gameState && r.players.some(p => p.username === username));
+    if (!room) return;
+    const playerIdx = room.players.findIndex(p => p.username === username);
+    if (room.gameState.currentPlayer !== playerIdx) return;
+    if (placeTile(room.gameState, tile, side, playerIdx)) advanceTurn(room);
   });
 
   socket.on('game:pass', () => {
-    const username = socketUsers.get(socket.id);
-    const room = findRoomByPlayer(username);
-    if (!room?.game) return;
-    handlePass(room, username);
-  });
-
-  socket.on('practice:start', ({ level }) => {
-    const username = socketUsers.get(socket.id);
+    const username = state.onlineSockets[socket.id];
     if (!username) return;
-    const practiceId = 'PRAC-' + socket.id;
-    state.rooms[practiceId] = {
-      id: practiceId, host: username,
-      players: [
-        { username, seatIndex: 0, team: 0, isBot: false },
-        { username: 'Bot1', seatIndex: 1, team: 0, isBot: true },
-        { username: 'Bot2', seatIndex: 2, team: 1, isBot: true },
-        { username: 'Bot3', seatIndex: 3, team: 1, isBot: true },
-      ],
-      buyIn: 0, pot: 0, started: false, provinceId: null, isPractice: true,
-    };
-    socket.join(practiceId);
-    startGameInRoom(state.rooms[practiceId]);
+    const room = Object.values(state.rooms).find(r => r.gameState && r.players.some(p => p.username === username));
+    if (!room) return;
+    const playerIdx = room.players.findIndex(p => p.username === username);
+    if (room.gameState.currentPlayer !== playerIdx) return;
+    advanceTurn(room);
   });
 
   socket.on('chat:send', ({ message }) => {
-    const username = socketUsers.get(socket.id);
+    const username = state.onlineSockets[socket.id];
     if (!username || !message?.trim()) return;
-    const room = findRoomByPlayer(username);
-    if (!room) return;
-    io.to(room.id).emit('chat:message', { username, message: message.trim().slice(0, 120) });
+    const room = Object.values(state.rooms).find(r => r.players.some(p => p.username === username));
+    if (room) io.to(room.id).emit('chat:message', { username, message: message.trim().substring(0, 120) });
   });
 
   socket.on('friends:list', () => {
-    const username = socketUsers.get(socket.id);
-    const user = getUserByUsername(username);
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
     if (!user) return;
-    const friends = (user.friends || []).map(f => {
-      const fu = getUserByUsername(f);
-      return { username: fu?.username || f, online: [...socketUsers.values()].includes(f) };
-    });
+    const friends = (user.friends || []).map(f => ({ username: f, online: !!Object.values(state.onlineSockets).find(u => u === f.toLowerCase()) }));
     socket.emit('friends:list', friends);
     socket.emit('friends:requests', user.friendRequests || []);
   });
 
   socket.on('friends:add', ({ targetUsername }) => {
-    const username = socketUsers.get(socket.id);
-    const target = getUserByUsername(targetUsername);
-    if (!target) { socket.emit('friends:error', 'Usuario no encontrado'); return; }
-    if (target.username.toLowerCase() === username) { socket.emit('friends:error', 'No puedes agregarte a ti mismo'); return; }
-    target.friendRequests = target.friendRequests || [];
-    if (!target.friendRequests.includes(username)) target.friendRequests.push(username);
-    const targetSocket = findSocketByUsername(targetUsername);
-    if (targetSocket) targetSocket.emit('friends:request', { from: username });
-    socket.emit('friends:request-sent');
-    saveState();
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
+    const target = state.users[targetUsername.toLowerCase()];
+    if (!user || !target) return socket.emit('friends:error', 'Usuario no encontrado');
+    if (!target.friendRequests) target.friendRequests = [];
+    if (!target.friendRequests.includes(username)) {
+      target.friendRequests.push(username);
+      const targSock = Object.keys(state.onlineSockets).find(k => state.onlineSockets[k] === targetUsername.toLowerCase());
+      if (targSock) io.to(targSock).emit('friends:request', { from: username });
+      socket.emit('friends:request-sent');
+    }
   });
 
   socket.on('friends:accept', ({ fromUsername }) => {
-    const username = socketUsers.get(socket.id);
-    const user = getUserByUsername(username);
-    if (!user) return;
-    user.friendRequests = (user.friendRequests || []).filter(f => f !== fromUsername.toLowerCase());
-    user.friends = user.friends || [];
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
+    const from = state.users[fromUsername.toLowerCase()];
+    if (!user || !from) return;
+    user.friendRequests = (user.friendRequests || []).filter(r => r !== fromUsername.toLowerCase());
+    if (!user.friends) user.friends = [];
+    if (!from.friends) from.friends = [];
     if (!user.friends.includes(fromUsername.toLowerCase())) user.friends.push(fromUsername.toLowerCase());
-    const other = getUserByUsername(fromUsername);
-    if (other) {
-      other.friends = other.friends || [];
-      if (!other.friends.includes(username)) other.friends.push(username);
-    }
-    saveState();
-    socket.emit('friends:list', (user.friends || []).map(f => ({ username: f, online: [...socketUsers.values()].includes(f) })));
+    if (!from.friends.includes(username)) from.friends.push(username);
+    socket.emit('friends:list', (user.friends || []).map(f => ({ username: f, online: !!Object.values(state.onlineSockets).find(u => u === f) })));
   });
 
-  socket.on('disconnect', () => {
-    socketUsers.delete(socket.id);
-    state.onlineCount = io.engine.clientsCount;
-    io.emit('online:count', state.onlineCount);
+  socket.on('practice:start', ({ level }) => {
+    const username = state.onlineSockets[socket.id];
+    const user = username ? state.users[username] : null;
+    if (!user) return;
+    const roomId = `PRAC-${socket.id.slice(0,6)}`;
+    const room = {
+      id: roomId, provinceId: null, buyIn: 0, isPractice: true, botLevel: level,
+      players: [
+        { username, seatIndex: 0, team: 0, isBot: false },
+        { username: 'Bot_Fácil',   seatIndex: 1, team: 1, isBot: true },
+        { username: 'Bot_Medio',   seatIndex: 2, team: 0, isBot: true },
+        { username: 'Bot_Difícil', seatIndex: 3, team: 1, isBot: true },
+      ],
+      host: username, gameStarted: false, pot: 0, scores: [0,0], isPublic: false
+    };
+    state.rooms[roomId] = room;
+    socket.join(roomId);
+    startGame(room);
   });
 });
 
-// ── Game Engine ────────────────────────────────────────────────
-function generateDominoes() {
-  const tiles = [];
-  for (let i = 0; i <= 6; i++)
-    for (let j = i; j <= 6; j++)
-      tiles.push([i, j]);
-  return tiles.sort(() => Math.random() - 0.5);
+// ── DOMINO ENGINE ──────────────────────────────────────────────
+function generateDeck() {
+  const deck = [];
+  for (let i = 0; i <= 6; i++) for (let j = i; j <= 6; j++) deck.push([i, j]);
+  return shuffle(deck);
 }
 
-function createMatch(provinceId, buyIn, playerUsernames, isPractice) {
-  const roomId = 'MATCH-' + Date.now();
-  const room = {
-    id: roomId, host: playerUsernames[0],
-    players: playerUsernames.map((u, i) => ({ username: u, seatIndex: i, team: i < 2 ? 0 : 1, isBot: false })),
-    buyIn, pot: buyIn * 4, started: false, provinceId, isPractice,
-  };
-  state.rooms[roomId] = room;
-  if (!isPractice) {
-    playerUsernames.forEach(u => {
-      const user = getUserByUsername(u);
-      if (user) {
-        user.coins = Math.max(0, user.coins - buyIn);
-        user.transactions = user.transactions || [];
-        user.transactions.push({ type: 'loss', amount: -buyIn, date: Date.now() });
-        const s = findSocketByUsername(u);
-        if (s) { s.join(roomId); s.emit('coins:update', user.coins); }
-      }
-    });
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
-  startGameInRoom(room);
-  saveState();
+  return arr;
 }
 
-function startGameInRoom(room) {
-  const tiles = generateDominoes();
-  const hands = [tiles.slice(0, 7), tiles.slice(7, 14), tiles.slice(14, 21), tiles.slice(21, 28)];
-  room.started = true;
-  room.game = {
-    hands, board: [], leftEnd: null, rightEnd: null,
-    currentPlayer: 0, scores: [0, 0], passCount: 0, roundsPlayed: 0,
-  };
-  io.to(room.id).emit('match:start', { roomId: room.id });
-  room.players.forEach((p, idx) => {
-    if (!p.isBot) {
-      const s = findSocketByUsername(p.username);
-      if (s) s.emit('game:state', buildStateForPlayer(room, idx));
-    }
-  });
-  startTimer(room);
-  if (room.players[room.game.currentPlayer]?.isBot) setTimeout(() => doBotPlay(room), 1200);
+function getLegalMoves(hand, leftEnd, rightEnd) {
+  if (leftEnd === null) return hand;
+  return hand.filter(t => t[0]===leftEnd || t[1]===leftEnd || t[0]===rightEnd || t[1]===rightEnd);
 }
 
-function buildStateForPlayer(room, playerIdx) {
-  const g = room.game;
-  return {
-    myHand: g.hands[playerIdx],
-    board: g.board,
-    leftEnd: g.leftEnd,
-    rightEnd: g.rightEnd,
-    currentPlayer: g.currentPlayer,
-    scores: g.scores,
-    handCounts: g.hands.map(h => h.length),
-    legalMoves: getLegalMoves(g.hands[playerIdx], g),
-  };
-}
-
-function getLegalMoves(hand, g) {
-  if (g.board.length === 0) return hand;
-  return hand.filter(t => t[0] === g.leftEnd || t[1] === g.leftEnd || t[0] === g.rightEnd || t[1] === g.rightEnd);
-}
-
-function handlePlay(room, username, tile, side) {
-  const g = room.game;
-  const playerIdx = room.players.findIndex(p => p.username.toLowerCase() === username);
-  if (playerIdx !== g.currentPlayer) return;
-  const hand = g.hands[playerIdx];
-  const tileIdx = hand.findIndex(t => t[0] === tile[0] && t[1] === tile[1]);
-  if (tileIdx === -1) return;
-
-  if (g.board.length === 0) {
-    g.board.push(tile); g.leftEnd = tile[0]; g.rightEnd = tile[1];
-  } else if (side === 'left') {
-    if (tile[1] === g.leftEnd) { g.board.unshift(tile); g.leftEnd = tile[0]; }
-    else if (tile[0] === g.leftEnd) { g.board.unshift([tile[1], tile[0]]); g.leftEnd = tile[1]; }
-    else return;
+function placeTile(gs, tile, side, playerIdx) {
+  const hand = gs.hands[playerIdx];
+  const idx = hand.findIndex(t => t[0]===tile[0] && t[1]===tile[1]);
+  if (idx === -1) return false;
+  if (gs.board.length === 0) {
+    gs.leftEnd = tile[0]; gs.rightEnd = tile[1]; gs.board.push(tile); hand.splice(idx,1); return true;
+  }
+  if (side === 'left') {
+    if (tile[1]===gs.leftEnd) { gs.board.unshift(tile); gs.leftEnd=tile[0]; }
+    else if (tile[0]===gs.leftEnd) { gs.board.unshift([tile[1],tile[0]]); gs.leftEnd=tile[1]; }
+    else return false;
   } else {
-    if (tile[0] === g.rightEnd) { g.board.push(tile); g.rightEnd = tile[1]; }
-    else if (tile[1] === g.rightEnd) { g.board.push([tile[1], tile[0]]); g.rightEnd = tile[0]; }
-    else return;
+    if (tile[0]===gs.rightEnd) { gs.board.push(tile); gs.rightEnd=tile[1]; }
+    else if (tile[1]===gs.rightEnd) { gs.board.push([tile[1],tile[0]]); gs.rightEnd=tile[0]; }
+    else return false;
   }
-
-  hand.splice(tileIdx, 1);
-  g.passCount = 0;
-  const isCapicua = hand.length === 0 && g.leftEnd === g.rightEnd;
-  if (hand.length === 0) { endRound(room, room.players[playerIdx].team, isCapicua ? 'capicua' : 'normal'); return; }
-
-  clearTimeout(room._timer);
-  g.currentPlayer = (g.currentPlayer + 1) % 4;
-  broadcastState(room);
-  startTimer(room);
-  if (room.players[g.currentPlayer]?.isBot) setTimeout(() => doBotPlay(room), 1000);
+  hand.splice(idx,1);
+  return true;
 }
 
-function handlePass(room, username) {
-  const g = room.game;
-  const playerIdx = room.players.findIndex(p => p.username.toLowerCase() === username);
-  if (playerIdx !== g.currentPlayer) return;
-  if (getLegalMoves(g.hands[playerIdx], g).length > 0) return;
-  g.passCount++;
-  if (g.passCount >= 4) { endRound(room, -1, 'tranca'); return; }
-  g.currentPlayer = (g.currentPlayer + 1) % 4;
-  broadcastState(room);
-  startTimer(room);
-  if (room.players[g.currentPlayer]?.isBot) setTimeout(() => doBotPlay(room), 1000);
+function startGame(room) {
+  room.gameStarted = true;
+  const deck = generateDeck();
+  const hands = [deck.slice(0,7), deck.slice(7,14), deck.slice(14,21), deck.slice(21,28)];
+  let firstPlayer = 0;
+  hands.forEach((h,i) => { if (h.some(t => t[0]===6&&t[1]===6)) firstPlayer=i; });
+  room.gameState = { hands, board:[], leftEnd:null, rightEnd:null, currentPlayer:firstPlayer, scores:[0,0], passCount:0 };
+  io.to(room.id).emit('match:start', { roomId: room.id });
+  room.players.forEach((p,i) => {
+    const sockId = Object.keys(state.onlineSockets).find(k => state.onlineSockets[k]===p.username.toLowerCase());
+    if (sockId) { io.to(sockId).emit('game:state', getPlayerState(room,i)); if(i===firstPlayer) io.to(sockId).emit('timer:start',{seconds:45}); }
+  });
+  if (room.players[firstPlayer]?.isBot) scheduleBotMove(room, firstPlayer);
 }
 
-function doBotPlay(room) {
-  const g = room.game;
-  if (!room.started || !g) return;
-  const playerIdx = g.currentPlayer;
-  if (!room.players[playerIdx]?.isBot) return;
-  const hand = g.hands[playerIdx];
-  const legal = getLegalMoves(hand, g);
-  if (legal.length === 0) { handlePass(room, room.players[playerIdx].username); return; }
-  const tile = legal[Math.floor(Math.random() * legal.length)];
-  handlePlay(room, room.players[playerIdx].username, tile, Math.random() < 0.5 ? 'left' : 'right');
+function getPlayerState(room, playerIdx) {
+  const gs = room.gameState;
+  return { board:gs.board, leftEnd:gs.leftEnd, rightEnd:gs.rightEnd, myHand:gs.hands[playerIdx], handCounts:gs.hands.map(h=>h.length), currentPlayer:gs.currentPlayer, legalMoves:getLegalMoves(gs.hands[playerIdx],gs.leftEnd,gs.rightEnd), scores:room.scores };
+}
+
+function advanceTurn(room) {
+  const gs = room.gameState;
+  const prev = gs.currentPlayer;
+  if (gs.hands[prev].length === 0) { endRound(room, prev%2===0?0:1, 'normal'); return; }
+  gs.currentPlayer = (gs.currentPlayer+1)%4;
+  gs.passCount = 0;
+  room.players.forEach((p,i) => {
+    const sockId = Object.keys(state.onlineSockets).find(k => state.onlineSockets[k]===p.username.toLowerCase());
+    if (sockId) { io.to(sockId).emit('game:state', getPlayerState(room,i)); if(i===gs.currentPlayer) io.to(sockId).emit('timer:start',{seconds:45}); }
+  });
+  const legal = getLegalMoves(gs.hands[gs.currentPlayer], gs.leftEnd, gs.rightEnd);
+  if (legal.length === 0) {
+    gs.passCount++;
+    if (gs.passCount >= 4) {
+      const teamSums = [0,1].map(team => room.players.filter(p=>p.team===team).reduce((sum,p)=>sum+gs.hands[room.players.indexOf(p)].reduce((s,t)=>s+t[0]+t[1],0),0));
+      endRound(room, teamSums[0]<=teamSums[1]?0:1, 'tranca'); return;
+    }
+    setTimeout(()=>advanceTurn(room), 500); return;
+  }
+  if (room.players[gs.currentPlayer]?.isBot) scheduleBotMove(room, gs.currentPlayer);
+}
+
+function scheduleBotMove(room, botIdx, delay = 800) {
+  setTimeout(() => {
+    const gs = room.gameState;
+    if (!gs || gs.currentPlayer!==botIdx) return;
+    const legal = getLegalMoves(gs.hands[botIdx], gs.leftEnd, gs.rightEnd);
+    if (legal.length===0) { advanceTurn(room); return; }
+    const tile = legal[Math.floor(Math.random()*legal.length)];
+    placeTile(gs, tile, Math.random()<0.5?'left':'right', botIdx);
+    advanceTurn(room);
+  }, delay + Math.random()*700);
 }
 
 function endRound(room, winnerTeam, type) {
-  const g = room.game;
-  clearTimeout(room._timer);
-  if (winnerTeam >= 0) {
-    g.scores[winnerTeam]++;
-  } else {
-    const pips = [0, 1, 2, 3].map(i => g.hands[i].reduce((s, t) => s + t[0] + t[1], 0));
-    const teamPips = [pips[0] + pips[1], pips[2] + pips[3]];
-    winnerTeam = teamPips[0] <= teamPips[1] ? 0 : 1;
-    g.scores[winnerTeam]++;
-  }
-  io.to(room.id).emit('round:end', { type, winnerTeam });
-  const matchWinner = g.scores.findIndex(s => s >= 6);
-  if (matchWinner >= 0) { endMatch(room, matchWinner, type); return; }
-  setTimeout(() => {
-    const tiles = generateDominoes();
-    g.hands = [tiles.slice(0, 7), tiles.slice(7, 14), tiles.slice(14, 21), tiles.slice(21, 28)];
-    g.board = []; g.leftEnd = null; g.rightEnd = null; g.passCount = 0;
-    g.roundsPlayed++; g.currentPlayer = g.roundsPlayed % 4;
-    broadcastState(room);
-    startTimer(room);
-    if (room.players[g.currentPlayer]?.isBot) setTimeout(() => doBotPlay(room), 1200);
-  }, 3000);
+  room.scores[winnerTeam]++;
+  io.to(room.id).emit('round:end', { winnerTeam, type, scores:room.scores });
+  if (room.scores[winnerTeam]>=6) { endMatch(room, winnerTeam, false); return; }
+  setTimeout(()=>{ room.gameState=null; startGame(room); }, 2000);
 }
 
-function endMatch(room, winnerTeam, type) {
-  const isPollona = room.game.scores[winnerTeam] === 6 && room.game.scores[1 - winnerTeam] === 0;
+function endMatch(room, winnerTeam, isPollona) {
   const pot = room.pot || 0;
-  const perPlayer = Math.floor(pot / 2);
-  if (!room.isPractice) {
-    room.players.forEach((p) => {
-      if (p.isBot) return;
-      const user = getUserByUsername(p.username);
-      if (!user) return;
-      if (p.team === winnerTeam) {
-        user.coins += perPlayer;
-        user.stats.wins++;
-        user.stats.earnings += perPlayer;
-        user.transactions.push({ type: 'win', amount: perPlayer, date: Date.now() });
-        const s = findSocketByUsername(p.username);
-        if (s) s.emit('coins:update', user.coins);
-      }
-      user.stats.games++;
-    });
-    saveState();
-  }
-  io.to(room.id).emit('match:end', { winnerTeam, scores: room.game.scores, perPlayer, isPollona, type });
-  io.emit('leaderboard:update', Object.values(state.users)
-    .filter(u => u.verified)
-    .sort((a, b) => (b.stats?.earnings || 0) - (a.stats?.earnings || 0))
-    .slice(0, 10)
-    .map(u => ({ username: u.username, earnings: u.stats?.earnings || 0 })));
-  setTimeout(() => { delete state.rooms[room.id]; }, 30000);
-}
-
-function broadcastState(room) {
-  room.players.forEach((p, idx) => {
-    if (!p.isBot) {
-      const s = findSocketByUsername(p.username);
-      if (s) s.emit('game:state', buildStateForPlayer(room, idx));
+  const winners = room.players.filter(p=>p.team===winnerTeam&&!p.isBot);
+  const perPlayer = winners.length>0 ? Math.floor(pot/winners.length) : 0;
+  winners.forEach(p => {
+    const user = state.users[p.username.toLowerCase()];
+    if (user&&!room.isPractice) {
+      user.coins+=perPlayer; user.stats.wins=(user.stats.wins||0)+1;
+      user.stats.earnings=(user.stats.earnings||0)+(perPlayer-room.buyIn);
+      user.stats.games=(user.stats.games||0)+1;
+      user.transactions.push({type:'win',amount:perPlayer-room.buyIn,date:new Date().toISOString()});
+      const sockId=Object.keys(state.onlineSockets).find(k=>state.onlineSockets[k]===p.username.toLowerCase());
+      if(sockId) io.to(sockId).emit('coins:update',user.coins);
     }
   });
+  room.players.filter(p=>p.team!==winnerTeam&&!p.isBot).forEach(p=>{
+    const user=state.users[p.username.toLowerCase()];
+    if(user&&!room.isPractice){user.stats.games=(user.stats.games||0)+1;user.stats.earnings=(user.stats.earnings||0)-room.buyIn;user.transactions.push({type:'loss',amount:-room.buyIn,date:new Date().toISOString()});}
+  });
+  io.to(room.id).emit('match:end',{winnerTeam,isPollona,perPlayer,scores:room.scores});
+  io.emit('leaderboard:update',getLeaderboard());
+  saveState();
+  setTimeout(()=>{ delete state.rooms[room.id]; },10000);
 }
 
-function startTimer(room) {
-  clearTimeout(room._timer);
-  const seconds = 45;
-  io.to(room.id).emit('timer:start', { seconds });
-  room._timer = setTimeout(() => {
-    const g = room.game;
-    if (!g) return;
-    const p = room.players[g.currentPlayer];
-    if (p?.isBot) { doBotPlay(room); return; }
-    const legal = getLegalMoves(g.hands[g.currentPlayer], g);
-    if (legal.length > 0) handlePlay(room, p.username, legal[0], 'right');
-    else handlePass(room, p.username);
-  }, seconds * 1000);
+function getLeaderboard() {
+  return Object.values(state.users).filter(u=>u.stats?.earnings>0).sort((a,b)=>b.stats.earnings-a.stats.earnings).slice(0,10).map(u=>({username:u.username,earnings:u.stats.earnings}));
 }
 
-function findRoomByPlayer(username) {
-  return Object.values(state.rooms).find(r => r.players?.some(p => p.username.toLowerCase() === username));
-}
-
-function findSocketByUsername(username) {
-  for (const [sid, uname] of socketUsers.entries()) {
-    if (uname === username.toLowerCase()) return io.sockets.sockets.get(sid);
-  }
-  return null;
-}
-
-// ── Start ──────────────────────────────────────────────────────
+// ── START ──────────────────────────────────────────────────────
 loadState().then(() => {
-  server.listen(PORT, () => console.log(`DomiDom server running on port ${PORT}`));
+  // Ensure support user exists
+  if (!state.users[SUPPORT_USER]) {
+    state.users[SUPPORT_USER] = {
+      username: SUPPORT_USER, email: SUPPORT_EMAIL, phone: '',
+      passwordHash: hashPassword(SUPPORT_PASS), token: generateToken(),
+      coins: 0, isAdmin: false, isSupportAgent: true, verified: true, banned: false,
+      friends: [], friendRequests: [], stats: {games:0,wins:0,earnings:0},
+      transactions: [], createdAt: new Date().toISOString()
+    };
+    saveState();
+  }
+  server.listen(PORT, () => {
+    console.log(`✅ DomiDom corriendo en puerto ${PORT}`);
+    console.log(`   Admin: ${ADMIN_USER} | Soporte: ${SUPPORT_USER} / ${SUPPORT_PASS}`);
+  });
 });

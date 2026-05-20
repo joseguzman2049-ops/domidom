@@ -159,6 +159,47 @@ h1,h2,h3{font-family:'Bricolage Grotesque',sans-serif;}
 .tx-amount{font-weight:700;font-size:0.9rem;}
 .tx-amount.positive{color:var(--green);}
 .tx-amount.negative{color:var(--red);}
+/* ── FICHAS DE DOMINÓ CON PUNTOS REALES ── */
+.domino-tile{
+  background:#f7f1de;
+  border:1.5px solid #9a8a6a;
+  border-radius:5px;
+  box-shadow:0 2px 6px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.15);
+  display:flex;flex-direction:column;
+  user-select:none;overflow:hidden;
+}
+.domino-tile.h{flex-direction:row}
+.domino-tile .tile-half.pip-half{
+  flex:1;display:flex;align-items:center;justify-content:center;padding:3px;
+}
+.domino-tile .tile-divider{
+  height:1.5px;width:100%;background:#9a8a6a;flex-shrink:0;
+}
+.domino-tile.h .tile-divider{width:1.5px;height:100%;}
+.pip-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  grid-template-rows:repeat(3,1fr);
+  width:100%;height:100%;
+  place-items:center;gap:1px;
+}
+.pip-grid span{display:block;width:6px;height:6px;}
+.pip-grid span.pip{
+  border-radius:50%;
+  background:#1a1a1a;
+  box-shadow:inset 0 1px 1px rgba(255,255,255,.25),0 1px 1px rgba(0,0,0,.5);
+  width:7px;height:7px;
+}
+/* badge de extremos */
+#ends-badge{
+  position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.5);backdrop-filter:blur(4px);
+  padding:3px 14px;border-radius:999px;
+  font-size:11px;color:#fff;letter-spacing:.5px;
+  display:none;z-index:5;white-space:nowrap;
+  border:1px solid rgba(255,255,255,.1);
+}
+
 /* GAME SCREEN */
 #screen-game{background:var(--bg);min-height:calc(100vh - 58px);display:none;flex-direction:column;}
 #screen-game.active{display:flex;}
@@ -568,6 +609,7 @@ h1,h2,h3{font-family:'Bricolage Grotesque',sans-serif;}
     <div class="board-center">
       <div class="board-area">
         <div class="board-container" id="board-container">
+          <div id="ends-badge"></div>
           <div class="board-felt"><div id="snake"></div></div>
         </div>
       </div>
@@ -606,6 +648,19 @@ h1,h2,h3{font-family:'Bricolage Grotesque',sans-serif;}
       <div class="crash-multiplier" id="crash-multiplier" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10;">1.00x</div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;" id="crash-history"></div>
+
+    <!-- Live activity feed -->
+    <div id="crash-live-feed" style="background:rgba(0,0,0,0.3);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:12px;max-height:110px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;">
+      <div style="font-size:0.68rem;font-weight:700;color:var(--text3);letter-spacing:1px;margin-bottom:4px;">⚡ ACTIVIDAD EN VIVO</div>
+    </div>
+
+    <!-- Round countdown banner -->
+    <div id="crash-round-banner" style="display:none;text-align:center;padding:10px;background:rgba(0,231,1,0.08);border:1px solid rgba(0,231,1,0.2);border-radius:6px;margin-bottom:12px;">
+      <div style="font-size:0.75rem;color:var(--text2);margin-bottom:4px;">PRÓXIMA RONDA EN</div>
+      <div id="crash-countdown-val" style="font-size:2rem;font-weight:900;color:var(--accent);font-family:'Bricolage Grotesque',sans-serif;">5</div>
+      <div style="font-size:0.7rem;color:var(--text3);">Apuesta ya para la siguiente ronda</div>
+    </div>
+
     <div class="crash-controls">
       <div>
         <div class="input-group" style="margin-bottom:8px;"><label>Apuesta (🪙)</label><input class="inp" id="crash-bet" type="number" value="50" min="1"/></div>
@@ -749,6 +804,7 @@ h1,h2,h3{font-family:'Bricolage Grotesque',sans-serif;}
 
 <div id="toast-container"></div>
 <script src="/socket.io/socket.io.js"></script>
+<script src="/board-renderer.js"></script>
 <script src="/game.js"></script>
 </body>
 </html>

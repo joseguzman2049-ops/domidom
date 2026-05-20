@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>DomiDom — Dominó Dominicano</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Bricolage+Grotesque:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/style.css"/>
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading-screen" id="loading-screen">
+  <div style="font-family:'Bricolage Grotesque',sans-serif;font-size:2.5rem;font-weight:900;">
+    <span style="display:inline-block;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#002d62 50%,#ce1126 50%);border:2px solid #f5c542;vertical-align:middle;margin-right:8px;"></span>Domi<span style="color:#f5c542;">Dom</span>
+  </div>
+  <div class="spinner"></div>
+  <div style="font-size:0.82rem;color:var(--text3);">Cargando…</div>
+</div>
+
+<!-- TOPBAR -->
+<nav id="topbar">
+  <div id="topbar-left">
+    <a class="logo" href="#" onclick="showScreen('home')">
+      <span class="flagmark"></span>Domi<span class="d1">Dom</span>
+    </a>
+    <div id="nav-links" class="hidden" style="display:flex;gap:4px;align-items:center;">
+      <button class="btn btn-outline btn-sm" onclick="showScreen('home')">🏠 Lobby</button>
+      <button class="btn btn-outline btn-sm" onclick="showScreen('friends')">👥 Amigos</button>
+    </div>
+  </div>
+  <div id="topbar-right">
+    <div id="wallet-pill-wrap" class="hidden">
+      <div class="wallet-pill" onclick="showScreen('wallet')">
+        <div class="wallet-coin">🪙</div>
+        <span class="wallet-amount" id="topbar-balance">0</span>
+        <span class="wallet-delta" id="topbar-delta" style="display:none;"></span>
+      </div>
+    </div>
+    <button class="btn btn-outline btn-sm hidden" id="btn-profile" onclick="showScreen('profile')">👤 <span id="topbar-username"></span></button>
+    <button class="btn btn-outline btn-sm hidden" id="btn-logout" onclick="doLogout()">Salir</button>
+    <button class="btn btn-gold btn-sm" id="btn-login-top" onclick="showScreen('login')">Entrar</button>
+    <button class="btn btn-outline btn-sm" id="btn-register-top" onclick="showScreen('register')">Registro</button>
+  </div>
+</nav>
+
+<!-- ══ SCREENS ══ -->
+
+<!-- HOME -->
+<div class="screen active" id="screen-home">
+  <div class="hero">
+    <div class="hero-title font-display">La mesa de dominó<br/><span>más real de RD</span></div>
+    <div class="hero-sub">Reta a jugadores reales, apuesta tus DomiCoins y llévate el pote.</div>
+    <div class="hero-badges">
+      <span class="badge badge-green">🟢 <span id="online-count">0</span> en línea</span>
+      <span class="badge badge-gold">🎯 Reglas dominicanas</span>
+      <span class="badge badge-blue">🔒 Juego justo</span>
+    </div>
+    <div id="hero-cta" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <button class="btn btn-gold btn-lg" onclick="showScreen('register')">🎮 Jugar Ahora</button>
+      <button class="btn btn-outline btn-lg" onclick="showScreen('login')">Iniciar Sesión</button>
+    </div>
+    <div id="hero-cta-logged" style="display:none;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <button class="btn btn-gold btn-lg" onclick="scrollToProvinces()">🎮 Escoger Mesa</button>
+      <button class="btn btn-ghost-green btn-lg" onclick="showPracticeModal()">🆓 Practicar Gratis</button>
+    </div>
+  </div>
+
+  <!-- Live ticker -->
+  <div class="ticker">
+    <div class="ticker-label">EN VIVO</div>
+    <div class="ticker-track" id="ticker-track">
+      <span class="ticker-item"><strong>Carlos_RD</strong> ganó <strong class="text-gold">+850 🪙</strong> en Santiago</span>
+      <span class="ticker-item win"><strong>Team Cibao</strong> ganó con ¡POLLONA!</span>
+      <span class="ticker-item"><strong>Nuevo jugador</strong> se unió desde La Romana</span>
+      <span class="ticker-item"><strong>María_DR</strong> ganó <strong class="text-gold">+1200 🪙</strong></span>
+      <span class="ticker-item win"><strong>Pedro23</strong> venció el nivel 10</span>
+      <span class="ticker-item"><strong>Carlos_RD</strong> ganó <strong class="text-gold">+850 🪙</strong> en Santiago</span>
+      <span class="ticker-item win"><strong>Team Cibao</strong> ganó con ¡POLLONA!</span>
+      <span class="ticker-item"><strong>Nuevo jugador</strong> se unió desde La Romana</span>
+      <span class="ticker-item"><strong>María_DR</strong> ganó <strong class="text-gold">+1200 🪙</strong></span>
+      <span class="ticker-item win"><strong>Pedro23</strong> venció el nivel 10</span>
+    </div>
+  </div>
+
+  <div class="lobby-layout">
+    <div>
+      <div class="section-title">Modo de Juego</div>
+      <div class="mode-cards">
+        <div class="mode-card" onclick="scrollToProvinces()">
+          <div class="mode-card-icon">🗺️</div>
+          <div class="mode-card-title">Provincias</div>
+          <div class="mode-card-desc">Emparejamiento público. 4 humanos. Gana el pote.</div>
+        </div>
+        <div class="mode-card" onclick="showFriendRoomModal()">
+          <div class="mode-card-icon">🔐</div>
+          <div class="mode-card-title">Sala Privada</div>
+          <div class="mode-card-desc">Código DOMI-XXXX. Invita amigos. Agrega bots.</div>
+        </div>
+        <div class="mode-card practice-card" onclick="showPracticeModal()">
+          <div class="mode-card-icon">🆓</div>
+          <div class="mode-card-title">Práctica</div>
+          <div class="mode-card-desc">10 niveles. Gratis. Sin impacto en estadísticas.</div>
+          <div class="badge badge-green mt-8" style="font-size:0.7rem;">SIN COSTO</div>
+        </div>
+      </div>
+
+      <div class="section-title" id="provinces-anchor">Provincias — Elige tu Mesa</div>
+      <div class="province-grid" id="province-grid"></div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sidebar-card">
+        <div class="sidebar-card-title">Mis Estadísticas</div>
+        <div id="sidebar-stats-logged" style="display:none;">
+          <div class="stats-row">
+            <div class="stat-chip"><div class="stat-chip-val" id="stat-games">0</div><div class="stat-chip-lbl">Juegos</div></div>
+            <div class="stat-chip"><div class="stat-chip-val" id="stat-wins">0</div><div class="stat-chip-lbl">Victorias</div></div>
+            <div class="stat-chip"><div class="stat-chip-val" id="stat-net">0</div><div class="stat-chip-lbl">Net 🪙</div></div>
+          </div>
+        </div>
+        <div id="sidebar-stats-guest" class="empty-state" style="padding:20px 0 0;">
+          <div>Inicia sesión para ver tus estadísticas</div>
+          <button class="btn btn-gold btn-sm mt-12" onclick="showScreen('login')">Entrar</button>
+        </div>
+      </div>
+
+      <div class="sidebar-card">
+        <div class="sidebar-card-title">🏆 Top Jugadores</div>
+        <div id="leaderboard-mini"><div class="empty-state" style="padding:10px 0;"><div class="spinner" style="width:24px;height:24px;border-width:2px;"></div></div></div>
+      </div>
+
+      <div class="sidebar-card" style="background:linear-gradient(135deg,rgba(245,197,66,0.08),var(--card));border-color:rgba(245,197,66,0.3);">
+        <div class="sidebar-card-title" style="color:var(--gold);">💰 DomiCoins</div>
+        <div class="text-sm text-muted mb-16">Los DomiCoins son moneda de juego virtual. No tienen valor monetario.</div>
+        <button class="btn btn-gold w-full" onclick="showScreen('wallet')">Ver Billetera →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div class="screen" id="screen-login">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div class="logo" style="justify-content:center;font-size:1.8rem;"><span class="flagmark" style="width:26px;height:26px;"></span>Domi<span class="d1">Dom</span></div>
+      </div>
+      <div class="auth-title">Bienvenido de vuelta</div>
+      <div class="auth-sub">Inicia sesión para continuar jugando</div>
+      <div class="input-group"><label>Usuario</label><input class="inp" id="login-user" type="text" placeholder="tu_usuario" autocomplete="username"/></div>
+      <div class="input-group"><label>Contraseña</label><input class="inp" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+      <div id="login-err" class="badge badge-red mb-16" style="display:none;"></div>
+      <button class="btn btn-gold w-full btn-lg" id="btn-login-submit" onclick="doLogin()">Iniciar Sesión</button>
+      <div class="auth-switch">¿No tienes cuenta? <a onclick="showScreen('register')">Regístrate</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- REGISTER -->
+<div class="screen" id="screen-register">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div class="logo" style="justify-content:center;font-size:1.8rem;"><span class="flagmark" style="width:26px;height:26px;"></span>Domi<span class="d1">Dom</span></div>
+      </div>
+      <div class="auth-title">Crear Cuenta</div>
+      <div class="auth-sub">Únete y empieza a jugar hoy</div>
+      <div class="input-group"><label>Usuario (3-20 chars)</label><input class="inp" id="reg-user" type="text" placeholder="tu_usuario"/></div>
+      <div class="grid-2">
+        <div class="input-group"><label>Contraseña</label><input class="inp" id="reg-pass" type="password" placeholder="••••••••"/></div>
+        <div class="input-group"><label>Confirmar</label><input class="inp" id="reg-pass2" type="password" placeholder="••••••••"/></div>
+      </div>
+      <div class="input-group"><label>Email</label><input class="inp" id="reg-email" type="email" placeholder="correo@ejemplo.com"/></div>
+      <div class="input-group"><label>Teléfono</label><input class="inp" id="reg-phone" type="tel" placeholder="8091234567"/></div>
+      <div id="reg-err" class="badge badge-red mb-16" style="display:none;"></div>
+      <button class="btn btn-gold w-full btn-lg" id="btn-reg-submit" onclick="doRegister()">Crear Cuenta</button>
+      <div class="auth-switch">¿Ya tienes cuenta? <a onclick="showScreen('login')">Inicia sesión</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- EMAIL VERIFY -->
+<div class="screen" id="screen-verify">
+  <div class="auth-wrap">
+    <div class="auth-card" style="text-align:center;">
+      <div style="font-size:3rem;margin-bottom:16px;">📧</div>
+      <div class="auth-title">Verifica tu email</div>
+      <div class="auth-sub">Código enviado a <strong id="verify-email-display"></strong></div>
+      <div class="input-group" style="max-width:200px;margin:0 auto 16px;">
+        <input class="inp" id="verify-code" type="text" placeholder="000000" maxlength="6" style="text-align:center;font-size:1.4rem;letter-spacing:8px;font-weight:700;"/>
+      </div>
+      <div id="verify-err" class="badge badge-red mb-16" style="display:none;"></div>
+      <button class="btn btn-gold w-full" onclick="doVerify()">Verificar</button>
+      <div class="text-sm text-muted mt-12">¿No recibiste el código? <a style="color:var(--gold);cursor:pointer;" onclick="doResend()">Reenviar</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- WALLET -->
+<div class="screen" id="screen-wallet">
+  <div class="wallet-screen">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px;">
+      <h2 style="font-size:1.5rem;font-weight:800;">🪙 Mi Billetera DomiCoin</h2>
+      <button class="btn btn-outline btn-sm" onclick="showScreen('home')">← Volver</button>
+    </div>
+    <div class="wallet-balance-big">
+      <div>
+        <div class="balance-label">Saldo de Juego</div>
+        <div class="balance-amount" id="wallet-balance-display">0 🪙</div>
+        <div class="text-sm text-muted mt-4" id="wallet-net-display">Net: 0 | Juegos: 0 | Victorias: 0</div>
+        <div class="badge badge-gray mt-8" style="font-size:0.72rem;">Los DomiCoins son moneda virtual de juego — no tienen valor monetario</div>
+      </div>
+    </div>
+    <div class="sidebar-card mt-24">
+      <div class="sidebar-card-title">📋 Historial de Partidas</div>
+      <div class="tx-list" id="tx-list"><div class="empty-state"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- PROFILE -->
+<div class="screen" id="screen-profile">
+  <div class="profile-wrap">
+    <div class="profile-header">
+      <div class="profile-avatar-big" id="profile-avatar-big">?</div>
+      <div>
+        <div style="font-size:1.6rem;font-weight:800;" id="profile-name-display">-</div>
+        <div class="text-muted" id="profile-sub-display"></div>
+        <div class="flex gap-8 mt-8" id="profile-badges-row"></div>
+      </div>
+    </div>
+    <div class="stats-row mb-24">
+      <div class="stat-chip"><div class="stat-chip-val" id="p-games">0</div><div class="stat-chip-lbl">Juegos</div></div>
+      <div class="stat-chip"><div class="stat-chip-val" id="p-wins">0</div><div class="stat-chip-lbl">Victorias</div></div>
+      <div class="stat-chip"><div class="stat-chip-val" id="p-net">0</div><div class="stat-chip-lbl">Net 🪙</div></div>
+      <div class="stat-chip"><div class="stat-chip-val" id="p-wr">0%</div><div class="stat-chip-lbl">Win Rate</div></div>
+    </div>
+    <div class="section-title">⚙️ Configuración</div>
+    <div class="sidebar-card"><button class="btn btn-red w-full" onclick="doLogout()">Cerrar Sesión</button></div>
+  </div>
+</div>
+
+<!-- FRIENDS -->
+<div class="screen" id="screen-friends">
+  <div class="friends-wrap">
+    <h2 style="font-size:1.5rem;font-weight:800;margin-bottom:20px;">👥 Amigos</h2>
+    <div class="flex gap-8 mb-16">
+      <input class="inp" id="friend-search-inp" type="text" placeholder="Buscar usuario…" style="flex:1;"/>
+      <button class="btn btn-gold" onclick="doAddFriend()">+ Agregar</button>
+    </div>
+    <div id="friend-req-section" class="hidden">
+      <div class="section-title">Solicitudes</div>
+      <div id="friend-requests-list"></div>
+    </div>
+    <div class="section-title">Mis Amigos</div>
+    <div id="friends-list"><div class="empty-state"><div class="spinner"></div></div></div>
+  </div>
+</div>
+
+<!-- GAME -->
+<div class="screen" id="screen-game">
+  <div class="game-topbar">
+    <div class="flex items-center gap-12">
+      <span style="font-size:0.8rem;font-weight:700;color:var(--text2);letter-spacing:1px;" id="game-room-code">SALA</span>
+      <span class="badge badge-gray" id="game-pot-badge">Pote: 0 🪙</span>
+    </div>
+    <div class="game-score">
+      <div class="score-team team-a"><span style="font-size:0.72rem;color:var(--text2);">NOSOTROS</span><span class="score-val" id="score-a">0</span></div>
+      <span style="color:var(--text3);">—</span>
+      <div class="score-team team-b"><span class="score-val" id="score-b">0</span><span style="font-size:0.72rem;color:var(--text2);">ELLOS</span></div>
+      <span style="font-size:0.75rem;color:var(--text3);">/ 6</span>
+    </div>
+    <div class="turn-timer" id="turn-timer"><span>⏱</span><span id="timer-val">45</span><span>s</span></div>
+  </div>
+  <div class="timer-bar-wrap"><div class="timer-bar" id="timer-bar" style="width:100%;"></div></div>
+
+  <!-- Waiting lobby -->
+  <div class="game-lobby" id="game-lobby">
+    <h2 id="game-lobby-title">Esperando jugadores…</h2>
+    <div class="lobby-seats" id="lobby-seats-display"></div>
+    <div class="badge badge-gray" id="game-lobby-info">4 jugadores necesarios</div>
+    <div id="host-controls" style="display:none;gap:10px;flex-wrap:wrap;justify-content:center;">
+      <button class="btn btn-outline" onclick="doAddBot()">🤖 Agregar Bot</button>
+      <button class="btn btn-gold" onclick="doStartGame()">▶ Iniciar Juego</button>
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="leaveRoom()">← Salir</button>
+  </div>
+
+  <!-- Playing -->
+  <div class="game-main" id="game-main" style="display:none;">
+    <div style="display:flex;flex-direction:column;flex:1;">
+      <div class="seat-strip" id="seats-top"></div>
+      <div class="board-area">
+        <div class="board-container" id="board-container">
+          <div class="board-felt"><div class="snake" id="snake"></div></div>
+        </div>
+      </div>
+      <div class="seat-strip" id="seats-bottom"></div>
+      <div class="my-hand" id="my-hand"></div>
+      <div class="hand-controls" id="hand-controls">
+        <button class="btn btn-outline btn-sm hidden" id="btn-place-left" onclick="placeSelectedLeft()">← Izquierda</button>
+        <button class="btn btn-outline btn-sm hidden" id="btn-place-right" onclick="placeSelectedRight()">Derecha →</button>
+        <button class="btn btn-outline btn-sm hidden" id="btn-pass" onclick="doPass()">⏭ Pasar</button>
+      </div>
+    </div>
+    <div class="chat-sidebar">
+      <div class="chat-header">💬 Chat de Mesa</div>
+      <div class="chat-msgs" id="chat-msgs"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-inp" placeholder="Mensaje…" maxlength="120" onkeydown="if(event.key==='Enter')sendChat()"/>
+        <button class="chat-send" onclick="sendChat()">→</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN -->
+<div class="screen" id="screen-admin">
+  <div class="admin-wrap">
+    <div class="admin-header">
+      <div style="font-size:1.5rem;font-weight:800;font-family:'Bricolage Grotesque',sans-serif;">⚙️ Centro de Administración</div>
+      <span style="padding:4px 12px;border-radius:20px;background:linear-gradient(135deg,var(--gold),var(--gold2));color:var(--bg);font-size:0.75rem;font-weight:800;letter-spacing:1px;">ADMIN</span>
+      <div style="flex:1;"></div>
+      <button class="btn btn-outline btn-sm" onclick="showScreen('home')">← Volver</button>
+    </div>
+    <div class="tab-pills mb-24" id="admin-tabs">
+      <button class="tab-pill active" onclick="switchAdminTab('users')">👥 Usuarios</button>
+      <button class="tab-pill" onclick="switchAdminTab('reports')">🐛 Reportes</button>
+    </div>
+    <div id="admin-tab-users">
+      <div class="flex gap-8 mb-16"><input class="inp" id="admin-user-search" type="text" placeholder="Buscar usuario…" oninput="filterAdminUsers()" style="max-width:300px;"/></div>
+      <div style="overflow-x:auto;">
+        <table class="admin-table" id="admin-users-table">
+          <thead><tr><th>Usuario</th><th>Email</th><th>Saldo 🪙</th><th>Net</th><th>Juegos</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody id="admin-users-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="admin-tab-reports" style="display:none;"><div class="empty-state"><div class="es-icon">🐛</div><div>Sin reportes pendientes</div></div></div>
+  </div>
+</div>
+
+<!-- ══ MODALS ══ -->
+
+<!-- Friend Room -->
+<div class="modal-backdrop" id="modal-friend-room">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">🔐 Sala Privada</div><button class="modal-close" onclick="closeModal('modal-friend-room')">✕</button></div>
+    <div class="tab-pills mb-16">
+      <button class="tab-pill active" onclick="switchFriendTab('create')">Crear</button>
+      <button class="tab-pill" onclick="switchFriendTab('join')">Unirse</button>
+    </div>
+    <div id="fr-create">
+      <div class="input-group"><label>Buy-in (🪙)</label><input class="inp" id="fr-buyin" type="number" value="100" min="0"/></div>
+      <button class="btn btn-gold w-full" onclick="doCreateRoom()">Crear Sala</button>
+    </div>
+    <div id="fr-join" style="display:none;">
+      <div class="input-group"><label>Código de sala</label><input class="inp" id="fr-code" type="text" placeholder="DOMI-XXXX" maxlength="9" style="text-transform:uppercase;"/></div>
+      <button class="btn btn-gold w-full" onclick="doJoinRoom()">Unirse</button>
+    </div>
+    <div id="fr-err" class="badge badge-red mt-12" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- Practice -->
+<div class="modal-backdrop" id="modal-practice">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">🆓 Modo Práctica</div><button class="modal-close" onclick="closeModal('modal-practice')">✕</button></div>
+    <p class="text-sm text-muted mb-16">Elige un nivel. Sin costo. Sin impacto en estadísticas reales.</p>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;" id="practice-levels"></div>
+    <div class="badge badge-gray mt-16" style="font-size:0.75rem;">Nivel máximo alcanzado: <strong id="prac-max-display">0</strong></div>
+  </div>
+</div>
+
+<!-- Queue -->
+<div class="modal-backdrop" id="modal-queue">
+  <div class="modal" style="text-align:center;">
+    <div class="modal-header" style="justify-content:center;position:relative;">
+      <div class="modal-title" id="queue-province-name">En cola…</div>
+      <button class="modal-close" style="position:absolute;right:0;" onclick="leaveQueue()">✕</button>
+    </div>
+    <div style="font-size:3rem;margin:16px 0;">⏳</div>
+    <div class="text-muted mb-8">Buscando jugadores…</div>
+    <div class="badge badge-gold mb-16" id="queue-buyin-badge">Buy-in: 0 🪙</div>
+    <div class="lobby-seats" id="queue-seats" style="justify-content:center;gap:10px;"></div>
+    <div class="text-sm text-muted mt-16">Solo emparejamos humanos. La espera puede tomar unos minutos.</div>
+    <button class="btn btn-outline w-full mt-16" onclick="leaveQueue()">Cancelar</button>
+  </div>
+</div>
+
+<!-- Admin Grant -->
+<div class="modal-backdrop" id="modal-admin-grant">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="grant-modal-title">Modificar Saldo</div><button class="modal-close" onclick="closeModal('modal-admin-grant')">✕</button></div>
+    <div id="grant-preview" class="bank-info mb-16" style="text-align:center;"></div>
+    <div class="input-group"><label>Cantidad (🪙)</label><input class="inp" id="grant-amount" type="number" min="1" placeholder="500" oninput="updateGrantPreview()"/></div>
+    <div class="flex gap-8">
+      <button class="btn btn-gold" style="flex:1;" onclick="confirmGrant('give')">✅ DAR</button>
+      <button class="btn btn-red" style="flex:1;" onclick="confirmGrant('take')">❌ QUITAR</button>
+    </div>
+  </div>
+</div>
+
+<!-- Support -->
+<div class="modal-backdrop" id="modal-support">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">💬 Soporte / Ayuda</div><button class="modal-close" onclick="closeModal('modal-support')">✕</button></div>
+    <p class="text-sm text-muted mb-16">Envíanos tu mensaje. Respuestas por el correo registrado.</p>
+    <div class="input-group"><label>Tipo</label><select class="inp" id="support-type"><option value="soporte">Soporte</option><option value="bug">Reporte de Bug</option><option value="otro">Otro</option></select></div>
+    <div class="input-group"><label>Mensaje</label><textarea class="inp" id="support-msg" rows="4" placeholder="Describe tu problema…" maxlength="500" style="resize:vertical;"></textarea></div>
+    <div id="support-err" class="badge badge-red mb-12" style="display:none;"></div>
+    <button class="btn btn-gold w-full" onclick="doSendSupport()">Enviar</button>
+  </div>
+</div>
+
+<!-- Win overlay -->
+<div id="win-overlay">
+  <div class="win-title" id="win-title-text">¡VICTORIA!</div>
+  <div class="win-coins" id="win-coins-text"></div>
+  <div class="win-breakdown" id="win-breakdown"></div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">
+    <button class="btn btn-gold btn-lg" onclick="closeWinOverlay()">Volver al Lobby</button>
+  </div>
+</div>
+
+<!-- Confetti canvas -->
+<canvas id="confetti-canvas"></canvas>
+
+<!-- Support float button -->
+<button onclick="openModal('modal-support')" style="position:fixed;bottom:20px;left:20px;z-index:90;background:linear-gradient(135deg,var(--bg3),var(--bg2));border:1px solid var(--border2);border-radius:50px;padding:10px 16px;color:var(--text2);font-size:0.8rem;font-weight:600;cursor:pointer;box-shadow:var(--shadow);transition:all 0.2s;display:flex;align-items:center;gap:6px;" onmouseover="this.style.borderColor='var(--gold)';this.style.color='var(--gold)'" onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text2)'">💬 Soporte</button>
+
+<div id="toast-container"></div>
+
+<script src="/game.js"></script>
+</body>
+</html>

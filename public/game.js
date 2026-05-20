@@ -1247,22 +1247,20 @@ function crashBet() {
   document.getElementById('crash-my-bet').textContent = `${bet} 🪙`;
   document.getElementById('crash-btn').style.display = 'none';
   document.getElementById('crash-cashout-btn').style.display = 'block';
-  startCrashRound();
 }
 
 function startCrashRound() {
   crashState = 'flying'; crashMult = 1.0; crashPoints = [];
   crashPlanetObjects = []; crashSpaceTime = 0;
-  // House edge: crash point skewed lower — 55% chance < 1.5x, rest exponential
+  // Generar punto de crash
   const rand = Math.random();
   let crashPoint;
-  if (rand < 0.20) { crashPoint = 1.00; }                             // 20% instant crash at 1.00x (no win possible)
-  else if (rand < 0.42) { crashPoint = 1.0 + Math.random() * 0.3; }  // 22% crash 1.0–1.3x
-  else if (rand < 0.58) { crashPoint = 1.3 + Math.random() * 0.5; }  // 16% crash 1.3–1.8x
-  else if (rand < 0.72) { crashPoint = 1.8 + Math.random() * 1.2; }  // 14% crash 1.8–3x
-  else if (rand < 0.84) { crashPoint = 3.0 + Math.random() * 3.0; }  // 12% crash 3–6x
-  else if (rand < 0.93) { crashPoint = 6.0 + Math.random() * 6.0; }  //  9% crash 6–12x
-  else { crashPoint = 12.0 + Math.random() * 18; }                    //  7% moon 12–30x
+  if (rand < 0.10) { crashPoint = 1.00; }
+  else if (rand < 0.30) { crashPoint = 1.3 + Math.random() * 1.0; }
+  else if (rand < 0.55) { crashPoint = 2.3 + Math.random() * 2.0; }
+  else if (rand < 0.78) { crashPoint = 4.0 + Math.random() * 5.0; }
+  else if (rand < 0.92) { crashPoint = 9.0 + Math.random() * 10.0; }
+  else { crashPoint = 19 + Math.random() * 30; }
   const startTime = Date.now();
   let planetTimer = 0;
   crashInterval = setInterval(() => {
@@ -1270,15 +1268,15 @@ function startCrashRound() {
     crashMult = Math.round(Math.pow(Math.E, elapsed*0.12)*100)/100;
     crashPoints.push({ t:elapsed, m:crashMult });
     document.getElementById('crash-multiplier').textContent = crashMult.toFixed(2)+'x';
-    document.getElementById('crash-live-mult').textContent = crashMult.toFixed(2)+'x';
-    document.getElementById('crash-potential').textContent = Math.floor(crashBetAmount*crashMult)+' 🪙';
-    document.getElementById('crash-cashout-val').textContent = `(${Math.floor(crashBetAmount*crashMult)} 🪙)`;
-    // Tension sound
-    if (Math.floor(elapsed) !== Math.floor(elapsed - 0.08)) playSound('crash_fly');
-    // Spawn planet every ~3s as we go higher
+    if (crashBetAmount > 0 && !crashCashedOut) {
+      document.getElementById('crash-live-mult').textContent = crashMult.toFixed(2)+'x';
+      document.getElementById('crash-potential').textContent = Math.floor(crashBetAmount*crashMult)+' 🪙';
+      document.getElementById('crash-cashout-val').textContent = `(${Math.floor(crashBetAmount*crashMult)} 🪙)`;
+      if (Math.floor(elapsed) !== Math.floor(elapsed - 0.08)) playSound('crash_fly');
+      if (crashAutoCashout > 1 && crashMult >= crashAutoCashout) { crashCashout(); return; }
+    }
     planetTimer++;
     if (planetTimer % Math.max(5, 40 - Math.floor(crashMult)*3) === 0) spawnPlanet();
-    if (crashAutoCashout > 1 && crashMult >= crashAutoCashout && !crashCashedOut) { crashCashout(); return; }
     if (crashMult >= crashPoint) { doCrash(); }
   }, 80);
 }
@@ -1303,11 +1301,18 @@ function doCrash() {
   const multEl=document.getElementById('crash-multiplier');
   multEl.textContent=crashMult.toFixed(2)+'x'; multEl.classList.add('crashed');
   playSound('crash_boom');
-  if (!crashCashedOut) {
-    showToast(`💥 Crashed en ${crashMult.toFixed(2)}x`,'error');
+  stopFakeActivity();
+  showCrashLosses(crashMult.toFixed(2));
+  if (crashBetAmount > 0 && !crashCashedOut) {
+    // El dinero ya fue descontado al apostar — solo mostrar la pérdida
+    showToast(`💥 ¡Explotó en ${crashMult.toFixed(2)}x! Perdiste ${crashBetAmount.toLocaleString()} 🪙`, 'error');
     crashHistory.unshift({mult:crashMult,won:false});
     renderCrashHistory();
     api('POST','/api/crash/result',{bet:crashBetAmount,mult:crashMult,won:false}).catch(()=>{});
+    crashBetAmount = 0; // resetear para que no vuelva a mostrar pérdida
+  } else {
+    crashHistory.unshift({mult:crashMult,won:false});
+    renderCrashHistory();
   }
   endCrashRound(false);
 }
@@ -1316,14 +1321,18 @@ function endCrashRound(won) {
   document.getElementById('crash-cashout-btn').style.display='none';
   setTimeout(()=>{
     crashState='waiting'; crashMult=1.0; crashPoints=[];
+    crashBetAmount=0;
     document.getElementById('crash-multiplier').classList.remove('crashed');
     document.getElementById('crash-multiplier').textContent='1.00x';
     document.getElementById('crash-btn').style.display='block';
     document.getElementById('crash-my-bet').textContent='—';
     document.getElementById('crash-live-mult').textContent='—';
     document.getElementById('crash-potential').textContent='—';
+    document.getElementById('crash-cashout-val').textContent='';
     crashPlanetObjects=[];
-  },3000);
+    // Iniciar siguiente ronda automáticamente
+    startCrashCountdown(7);
+  }, 3000);
 }
 
 function renderCrashHistory() {
